@@ -6,6 +6,8 @@ const state = {
   messages: [],
   detailId: null,
   fontIdx: 0,
+  liveRows: [],
+  liveFetch: 0,
 };
 
 const els = {
@@ -32,6 +34,7 @@ const els = {
   resultHeadline: document.getElementById("result-headline"),
   resultList: document.getElementById("result-list"),
   resultEmpty: document.getElementById("result-empty"),
+  liveStatus: document.getElementById("live-status"),
   restartBtn: document.getElementById("restart-btn"),
   resultGuideBtn: document.getElementById("result-guide-btn"),
   backResultBtn: document.getElementById("back-result-btn"),
@@ -91,6 +94,8 @@ function startChat() {
   state.multiPicked = [];
   state.messages = [botMsg(QUESTIONS[0])];
   state.detailId = null;
+  state.liveRows = [];
+  state.liveFetch += 1;
   resetChatLog();
   appendBubble(state.messages[0]);
   renderProgress();
@@ -213,7 +218,8 @@ function matched() {
   const wanted = rows.filter((r) => r.hit);
   const list = wanted.length ? wanted : rows;
   const order = { yes: 0, unknown: 1 };
-  return list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict]).slice(0, 8);
+  return list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict]).slice(0, 8)
+    .concat(state.liveRows);
 }
 
 function renderSegments() {
@@ -290,9 +296,14 @@ function ageLabel() {
 function renderResults() {
   const rows = matched();
   const interests = Array.isArray(state.answers.interest) ? state.answers.interest : [];
+  const catalogCount = rows.filter((r) => !r.p.remoteId).length;
+  const liveCount = rows.filter((r) => r.p.remoteId).length;
 
   els.profileLine.textContent = [ageLabel(), state.answers.region, interests.join("·")].filter(Boolean).join(" · ");
   els.resultHeadline.textContent = rows.length ? `받을 수 있어 보이는 정책 ${rows.length}건` : "결과";
+  if (liveCount) {
+    els.resultHeadline.textContent = `받을 수 있어 보이는 정책 ${catalogCount}건 · 온통청년 ${liveCount}건`;
+  }
 
   els.resultList.innerHTML = "";
   rows.forEach(({ p, ev }) => {
@@ -316,10 +327,7 @@ function renderResults() {
   showScreen("result");
 }
 
-function openDetail(id) {
-  const row = matched().find((r) => r.p.id === id);
-  if (!row) return;
-  state.detailId = id;
+function paintDetail(row) {
   const { p, ev } = row;
   const tone = ev.verdict === "yes" ? "yes" : ev.verdict === "unknown" ? "unknown" : "no";
   const title = ev.verdict === "yes" ? "됩니다" : ev.verdict === "unknown" ? "확인이 필요합니다" : "어렵습니다";
@@ -344,11 +352,125 @@ function openDetail(id) {
   } else {
     els.detailLink.textContent = "담당 기관 공고를 확인해 주세요.";
   }
+}
+
+function openDetail(id) {
+  const row = matched().find((r) => r.p.id === id);
+  if (!row) return;
+  state.detailId = id;
+  paintDetail(row);
   showScreen("detail");
+  if (row.p.remoteId && row.p.remoteSource === "policy") {
+    fillLiveDetail(row);
+  }
+}
+
+async function fillLiveDetail(row) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(
+      `/api/policies?id=${encodeURIComponent(row.p.remoteId)}&source=policy`,
+      { signal: controller.signal }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.item || state.detailId !== row.p.id) return;
+    if (data.item.summary) els.detailSummary.textContent = data.item.summary;
+    const text = data.item.text || "";
+    const docs = [];
+    text.split("\n").forEach((line) => {
+      if (line.indexOf("제출 서류:") === 0 || line.indexOf("서류:") === 0) {
+        const rest = line.replace(/^[^:]+:\s*/, "");
+        rest.split(/[,\n]/).forEach((part) => {
+          const t = part.trim();
+          if (t) docs.push(t);
+        });
+      }
+    });
+    if (docs.length) {
+      els.detailDocs.innerHTML = docs.slice(0, 8).map((d) => `<li>${esc(d)}</li>`).join("");
+    }
+    const dead = text.split("\n").find((line) => line.indexOf("신청 기간:") === 0);
+    if (dead) els.detailDeadline.textContent = dead.replace("신청 기간:", "").trim();
+  } catch (_) {
+    /* 목록 요약만 보여 준다 */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function mapLiveItem(item, source) {
+  const a = state.answers;
+  return {
+    p: {
+      id: "live-" + source + "-" + item.id,
+      remoteId: item.id,
+      remoteSource: source,
+      title: item.title,
+      org: item.inst || "온통청년",
+      cat: source === "space" ? ["문화"] : ["일자리"],
+      summary: item.summary || "온통청년에서 가져온 항목입니다.",
+      docs: ["공고 원문에서 확인"],
+      deadline: "공고 원문에서 확인",
+      link: "https://www.youthcenter.go.kr/",
+      linkLabel: "온통청년",
+    },
+    ev: {
+      verdict: "yes",
+      reason: "온통청년 목록에서 입력한 나이·거주로 걸러 온 항목입니다. 서류·예산은 원문에서 확인하세요.",
+      checks: [
+        { match: "yes", text: item.age_check || (`나이 ${a.age}세 전후`) },
+        { match: "yes", text: item.region_check || (`거주 ${a.region || "미입력"}`) },
+        { match: "note", text: "예산 소진·서류 심사는 온통청년 원문에서 확인해야 합니다." },
+      ],
+    },
+  };
+}
+
+async function fetchLivePolicies() {
+  const ticket = state.liveFetch;
+  const a = state.answers;
+  if (els.liveStatus) els.liveStatus.textContent = "온통청년에서 같은 나이·지역 정책을 가져오는 중입니다.";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  const params = new URLSearchParams({ source: "policy" });
+  if (a.age != null) params.set("age", String(a.age));
+  if (a.region) params.set("region", a.region);
+  try {
+    const res = await fetch(`/api/policies?${params.toString()}`, { signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (ticket !== state.liveFetch) return;
+    if (!res.ok) {
+      throw new Error(data.error || "연결 실패");
+    }
+    const known = new Set(POLICIES.map((p) => p.title));
+    const items = Array.isArray(data.items) ? data.items : [];
+    state.liveRows = items
+      .filter((it) => it && it.id && it.title && !known.has(it.title))
+      .slice(0, 6)
+      .map((it) => mapLiveItem(it, "policy"));
+    if (els.liveStatus) {
+      els.liveStatus.textContent = state.liveRows.length
+        ? `온통청년에서 ${state.liveRows.length}건을 더 붙였습니다. 정부24·복지로·고용24는 이 서비스가 목록을 받아오지 않습니다.`
+        : "온통청년에 연결했지만, 지금 조건으로 더 붙일 항목은 없습니다. 정부24·복지로·고용24는 연결되지 않았습니다.";
+    }
+    if (state.screen === "result") renderResults();
+  } catch (_) {
+    if (ticket !== state.liveFetch) return;
+    state.liveRows = [];
+    if (els.liveStatus) {
+      els.liveStatus.textContent = "온통청년 목록에 연결하지 못했습니다. 위 결과는 예시 목록입니다. 정부24·복지로·고용24도 이 서비스가 받아오지 않습니다.";
+    }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function finishToResult() {
+  state.liveRows = [];
+  state.liveFetch += 1;
   renderResults();
+  fetchLivePolicies();
 }
 
 function bind() {
