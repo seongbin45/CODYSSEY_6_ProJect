@@ -246,10 +246,12 @@ def region_score(item):
         return 35, "전북"
     if len(codes) >= 5:
         return 10, "전국"
-    if len(codes) == 1 and codes[0] in GUNSAN_ZIP_CODES:
-        return 50, "군산"
-    if len(codes) == 1 and codes[0].startswith(JEONBUK_ZIP_PREFIXES):
-        return 30, "전북"
+    if len(codes) == 1:
+        if codes[0] in GUNSAN_ZIP_CODES:
+            return 50, "군산"
+        if codes[0].startswith(JEONBUK_ZIP_PREFIXES):
+            return 30, "전북"
+        return 5, "지역"
     if not codes:
         return 15, "전국"
     return 5, "복수 지역"
