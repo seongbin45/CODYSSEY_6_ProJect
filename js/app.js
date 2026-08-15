@@ -5,9 +5,7 @@ const state = {
   multiPicked: [],
   messages: [],
   detailId: null,
-  filter: "all",
   fontIdx: 0,
-  liveItems: [],
 };
 
 const els = {
@@ -32,10 +30,8 @@ const els = {
   segmentGrid: document.getElementById("segment-grid"),
   profileLine: document.getElementById("profile-line"),
   resultHeadline: document.getElementById("result-headline"),
-  resultFilter: document.getElementById("result-filter"),
   resultList: document.getElementById("result-list"),
   resultEmpty: document.getElementById("result-empty"),
-  liveStatus: document.getElementById("live-status"),
   restartBtn: document.getElementById("restart-btn"),
   resultGuideBtn: document.getElementById("result-guide-btn"),
   backResultBtn: document.getElementById("back-result-btn"),
@@ -68,7 +64,7 @@ function showScreen(name) {
   Object.entries(els.views).forEach(([key, node]) => {
     if (node) node.hidden = key !== name;
   });
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  window.scrollTo(0, 0);
 }
 
 function botMsg(q) {
@@ -81,9 +77,10 @@ function startChat() {
   state.multiPicked = [];
   state.messages = [botMsg(QUESTIONS[0])];
   state.detailId = null;
-  state.filter = "all";
-  state.liveItems = [];
-  renderChat();
+  resetChatLog();
+  appendBubble(state.messages[0]);
+  renderProgress();
+  renderChoices();
   showScreen("chat");
 }
 
@@ -100,12 +97,16 @@ function goBackStep() {
   state.step -= 1;
   state.multiPicked = [];
   state.messages = state.messages.slice(0, Math.max(0, state.messages.length - 2));
-  renderChat();
+  removeLastBubbles(2);
+  renderProgress();
+  renderChoices();
 }
 
 function answer(q, label, value) {
   state.answers[q.id] = value;
-  state.messages.push({ role: "user", text: label });
+  const userMsg = { role: "user", text: label };
+  state.messages.push(userMsg);
+  appendBubble(userMsg);
   const next = state.step + 1;
   if (next >= QUESTIONS.length) {
     state.step = next;
@@ -115,8 +116,11 @@ function answer(q, label, value) {
   }
   state.step = next;
   state.multiPicked = [];
-  state.messages.push(botMsg(QUESTIONS[next]));
-  renderChat();
+  const nextBot = botMsg(QUESTIONS[next]);
+  state.messages.push(nextBot);
+  appendBubble(nextBot);
+  renderProgress();
+  renderChoices();
 }
 
 function toggleMulti(v) {
@@ -195,8 +199,7 @@ function matched() {
   const wanted = rows.filter((r) => r.hit);
   const list = wanted.length ? wanted : rows;
   const order = { yes: 0, unknown: 1 };
-  const catalog = list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict]);
-  return catalog.concat(state.liveItems);
+  return list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict]).slice(0, 8);
 }
 
 function renderSegments() {
@@ -208,26 +211,35 @@ function renderSegments() {
   `).join("");
 }
 
-function renderChat() {
-  const q = QUESTIONS[Math.min(state.step, QUESTIONS.length - 1)];
+function resetChatLog() {
+  els.chatLog.innerHTML = "";
+}
+
+function appendBubble(m) {
+  const div = document.createElement("div");
+  div.className = "bubble is-new " + (m.role === "user" ? "bubble-user" : "bubble-bot");
+  if (m.role === "user") {
+    div.innerHTML = `<p>${esc(m.text)}</p>`;
+  } else {
+    div.innerHTML = `<p>${esc(m.text)}</p>${m.hint ? `<p class="bubble-hint">${esc(m.hint)}</p>` : ""}`;
+  }
+  els.chatLog.appendChild(div);
+  els.chatLog.scrollTop = els.chatLog.scrollHeight;
+}
+
+function removeLastBubbles(count) {
+  for (let i = 0; i < count; i += 1) {
+    if (els.chatLog.lastElementChild) els.chatLog.lastElementChild.remove();
+  }
+}
+
+function renderProgress() {
   const pct = Math.round((Math.min(state.step, QUESTIONS.length) / QUESTIONS.length) * 100);
   els.progressBar.style.width = pct + "%";
   els.progressLabel.textContent = `${Math.min(state.step + 1, QUESTIONS.length)} / ${QUESTIONS.length}`;
-
-  els.chatLog.innerHTML = state.messages.map((m) => {
-    if (m.role === "user") {
-      return `<div class="bubble bubble-user"><p>${esc(m.text)}</p></div>`;
-    }
-    return `<div class="bubble bubble-bot">
-      <p><strong>${esc(m.text)}</strong></p>
-      ${m.hint ? `<p class="bubble-hint">${esc(m.hint)}</p>` : ""}
-    </div>`;
-  }).join("");
-  els.chatLog.scrollTop = els.chatLog.scrollHeight;
-  renderChoices(true);
 }
 
-function renderChoices(focusFirst) {
+function renderChoices() {
   const q = QUESTIONS[Math.min(state.step, QUESTIONS.length - 1)];
   els.choiceList.innerHTML = "";
   q.options.forEach((opt) => {
@@ -239,7 +251,7 @@ function renderChoices(focusFirst) {
     btn.addEventListener("click", () => {
       if (q.multi) {
         toggleMulti(opt.v);
-        renderChoices(false);
+        renderChoices();
       } else {
         answer(q, opt.l, opt.v);
       }
@@ -254,10 +266,6 @@ function renderChoices(focusFirst) {
   } else {
     els.multiBtn.hidden = true;
   }
-  if (focusFirst) {
-    const first = els.choiceList.querySelector(".choice");
-    if (first) first.focus();
-  }
 }
 
 function ageLabel() {
@@ -267,24 +275,13 @@ function ageLabel() {
 
 function renderResults() {
   const rows = matched();
-  const visible = state.filter === "all" ? rows : rows.filter((r) => r.ev.verdict === state.filter);
-  const yesCount = rows.filter((r) => r.ev.verdict === "yes").length;
-  const unknownCount = rows.filter((r) => r.ev.verdict === "unknown").length;
   const interests = Array.isArray(state.answers.interest) ? state.answers.interest : [];
 
   els.profileLine.textContent = [ageLabel(), state.answers.region, interests.join("·")].filter(Boolean).join(" · ");
   els.resultHeadline.textContent = rows.length ? `받을 수 있어 보이는 정책 ${rows.length}건` : "결과";
 
-  els.resultFilter.innerHTML = [
-    { id: "all", label: `전체 ${rows.length}` },
-    { id: "yes", label: `됩니다 ${yesCount}` },
-    { id: "unknown", label: `확인 필요 ${unknownCount}` },
-  ].map((tab) => `
-    <button type="button" data-filter="${tab.id}" ${state.filter === tab.id ? 'aria-selected="true" class="is-on"' : ""}>${esc(tab.label)}</button>
-  `).join("");
-
   els.resultList.innerHTML = "";
-  visible.forEach(({ p, ev }) => {
+  rows.forEach(({ p, ev }) => {
     const chip = CHIP[ev.verdict];
     const btn = document.createElement("button");
     btn.type = "button";
@@ -301,7 +298,7 @@ function renderResults() {
     els.resultList.appendChild(btn);
   });
 
-  els.resultEmpty.hidden = visible.length > 0;
+  els.resultEmpty.hidden = rows.length > 0;
   showScreen("result");
 }
 
@@ -336,58 +333,8 @@ function openDetail(id) {
   showScreen("detail");
 }
 
-async function maybeFetchYouth() {
-  const age = state.answers.age;
-  const region = state.answers.region;
-  if (age == null || age < 19 || age > 39) return;
-  els.liveStatus.textContent = "온통청년에서 같은 나이·지역 정책을 더 찾고 있습니다.";
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
-  try {
-    const params = new URLSearchParams({ source: "policy", age: String(age) });
-    if (region) params.set("region", region);
-    const res = await fetch(`/api/policies?${params}`, { signal: controller.signal });
-    const data = await res.json().catch(() => ({}));
-    const items = Array.isArray(data.items) ? data.items : [];
-    const known = new Set(POLICIES.map((p) => p.title));
-    state.liveItems = items.slice(0, 6).filter((it) => it.title && !known.has(it.title)).map((it) => ({
-      p: {
-        id: "live-" + it.id,
-        title: it.title,
-        org: it.inst || "온통청년",
-        cat: ["일자리"],
-        summary: it.summary || "온통청년 목록에서 가져온 정책입니다. 원문에서 자격과 서류를 확인하세요.",
-        docs: ["공고 원문에서 확인"],
-        deadline: "공고 원문에서 확인",
-        link: "https://www.youthcenter.go.kr/",
-        linkLabel: "온통청년",
-        live: true,
-      },
-      ev: {
-        verdict: "unknown",
-        reason: "온통청년 목록에서 더 가져온 항목입니다. 공개 요약만 있어 확인이 필요합니다.",
-        checks: [
-          { match: "yes", text: `나이 ${age}세 전후 · 온통청년 청년 정책 목록` },
-          { match: region ? "yes" : "unknown", text: region ? `거주 ${region}` : "거주 미확인" },
-          { match: "unknown", text: "서류·소득·세부 자격은 공고 원문에서 확인해야 합니다." },
-        ],
-      },
-      hit: true,
-    }));
-    if (state.screen === "result") renderResults();
-    els.liveStatus.textContent = state.liveItems.length
-      ? `온통청년에서 ${state.liveItems.length}건을 더 붙였습니다.`
-      : "온통청년에서 더 붙일 항목이 없습니다.";
-  } catch (_) {
-    els.liveStatus.textContent = "온통청년 추가 목록은 생략했습니다. 위 결과만 보시면 됩니다.";
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function finishToResult() {
   renderResults();
-  maybeFetchYouth();
 }
 
 function bind() {
@@ -403,12 +350,6 @@ function bind() {
   els.fontBtn.addEventListener("click", () => {
     state.fontIdx = (state.fontIdx + 1) % FONTS.length;
     applyFont();
-  });
-  els.resultFilter.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-filter]");
-    if (!btn) return;
-    state.filter = btn.getAttribute("data-filter");
-    renderResults();
   });
 }
 

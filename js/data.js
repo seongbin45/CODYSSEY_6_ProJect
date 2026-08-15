@@ -203,18 +203,6 @@ const POLICIES = [
     docs: ["교통카드 이용내역", "주민등록초본"],
     deadline: "연 2회 모집", link: "https://youth.seoul.go.kr/", linkLabel: "서울 청년 포털",
   },
-  {
-    id: "p19", title: "대전 청년 서포터즈", org: "대전청년내일재단", cat: ["문화", "일자리"], age: [18, 39], regions: ["대전"],
-    summary: "대전광역시 생활권 청년이 청년정책 홍보 콘텐츠를 만들고 활동비를 받습니다.",
-    docs: ["지원서(이메일 제출)"],
-    deadline: "연도별 모집 공고 시", link: "https://www.daejeonyouthportal.kr/", linkLabel: "대전청년포털",
-  },
-  {
-    id: "p20", title: "자립준비청년 자립수당", org: "보건복지부", cat: ["금융", "주거"], age: [18, 24],
-    summary: "보호종료 청년에게 일정 기간 자립수당을 지급해 초기 정착을 돕습니다.",
-    docs: ["보호종료 확인서", "통장 사본", "신분증"],
-    deadline: "보호종료 후 신청 (지자체별 안내)", link: "https://www.bokjiro.go.kr/", linkLabel: "복지로",
-  },
 ];
 
 const SEGMENTS = [
