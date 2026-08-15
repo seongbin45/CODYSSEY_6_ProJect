@@ -70,7 +70,9 @@ function cycleFont() {
 function scrollChat() {
   const el = els.chatLog;
   if (!el) return;
-  el.scrollTop = el.scrollHeight;
+  requestAnimationFrame(() => {
+    el.scrollTop = el.scrollHeight;
+  });
 }
 
 function showScreen(name) {
@@ -237,6 +239,9 @@ function appendBubble(m) {
   } else {
     div.innerHTML = `<p>${esc(m.text)}</p>${m.hint ? `<p class="bubble-hint">${esc(m.hint)}</p>` : ""}`;
   }
+  div.addEventListener("animationend", () => {
+    div.classList.remove("is-new");
+  }, { once: true });
   els.chatLog.appendChild(div);
   scrollChat();
 }
