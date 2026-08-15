@@ -416,6 +416,14 @@ def region_ok(item, city, source):
     return False, "주소·제목에 시·군 없음"
 
 
+def first_http(*values):
+    for value in values:
+        text = str(value or "").strip()
+        if text.startswith("http://") or text.startswith("https://"):
+            return text.replace(":8080", "")
+    return ""
+
+
 def summarize(item, source="policy"):
     if source == "content":
         title = str(item.get("pstTtl") or "제목 없음")
@@ -423,18 +431,21 @@ def summarize(item, source="policy"):
         inst = str(item.get("pstSeNm") or "")
         uid = str(item.get("pstSn") or "")
         label = "콘텐츠"
+        link = first_http(item.get("refUrlAddr1"))
     elif source == "space":
         title = str(item.get("cntrNm") or "이름 없음")
         expl = (str(item.get("cntrAddr") or "") + " " + str(item.get("cntrDaddr") or "")).strip()
         inst = str(item.get("stdgSggCdNm") or item.get("stdgCtpvCdNm") or "")
         uid = str(item.get("cntrSn") or "")
         label = inst or "청년공간"
+        link = first_http(item.get("hmpgUrlAddr"), item.get("refUrlAddr1"))
     else:
         title = str(item.get("plcyNm") or "제목 없음")
         expl = str(item.get("plcyExplnCn") or item.get("plcySprtCn") or "").strip()
         inst = str(item.get("sprvsnInstCdNm") or "")
         uid = str(item.get("plcyNo") or "")
         _, label = region_score(item)
+        link = first_http(item.get("aplyUrlAddr"), item.get("refUrlAddr1"), item.get("refUrlAddr2"))
     if len(expl) > 140:
         expl = expl[:140] + "…"
     return {
@@ -444,6 +455,8 @@ def summarize(item, source="policy"):
         "summary": expl,
         "region": label,
         "inst": inst,
+        "link": link,
+        "linkLabel": "신청·안내 페이지" if link else "온통청년",
     }
 
 

@@ -394,6 +394,11 @@ async function fillLiveDetail(row, endpoint) {
     }
     const dead = text.split("\n").find((line) => line.indexOf("신청 기간:") === 0);
     if (dead) els.detailDeadline.textContent = dead.replace("신청 기간:", "").trim();
+    const apply = text.split("\n").find((line) => line.indexOf("신청 주소:") === 0);
+    const href = apply ? apply.replace("신청 주소:", "").trim() : (data.item.link || "");
+    if (href.indexOf("http") === 0) {
+      els.detailLink.innerHTML = `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(data.item.linkLabel || "신청·안내 페이지")}</a>`;
+    }
   } catch (_) {
     /* 목록 요약만 보여 준다 */
   } finally {
@@ -414,8 +419,8 @@ function mapLiveItem(item, source) {
       summary: item.summary || "온통청년에서 가져온 항목입니다.",
       docs: ["공고 원문에서 확인"],
       deadline: "공고 원문에서 확인",
-      link: "https://www.youthcenter.go.kr/",
-      linkLabel: "온통청년",
+      link: item.link || "https://www.youthcenter.go.kr/",
+      linkLabel: item.linkLabel || (item.link ? "신청·안내 페이지" : "온통청년"),
     },
     ev: {
       verdict: "yes",
