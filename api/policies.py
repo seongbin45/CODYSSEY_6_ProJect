@@ -24,6 +24,8 @@ from xml.etree import ElementTree
 import json
 import os
 import re
+import socket
+import threading
 import time
 from pathlib import Path
 
@@ -32,11 +34,16 @@ POLICY_URL = BASE_URL + "/go/ythip/getPlcy"
 CONTENT_URL = BASE_URL + "/go/ythip/getContent"
 SPACE_URL = BASE_URL + "/go/ythip/getSpace"
 
-TIMEOUT = 5.0
+TIMEOUT = 3.0
 MAX_RETRIES = 1
-BACKOFF = 0.4
-PAGE_SIZE = 20
+BACKOFF = 0.2
+PAGE_SIZE = 12
+SOURCE_PAGE_SIZE = {"policy": 12, "content": 2, "space": 10}
+SOURCE_DEADLINE = 3.6
+MAX_BODY_BYTES = 180000
 MAX_TEXT_LEN = 2000
+
+socket.setdefaulttimeout(TIMEOUT)
 
 GUNSAN_HINTS = ("군산", "Gunsan", "GUNSAN")
 JEONBUK_HINTS = ("전북", "전라북", "전북특별", "전북자치")
@@ -164,7 +171,10 @@ def youth_get(url, params, key_name):
                 headers={"User-Agent": "doenayo/1.0", "Accept": "application/json"},
             )
             with urlopen(req, timeout=TIMEOUT) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
+                blob = resp.read(MAX_BODY_BYTES + 1)
+                if len(blob) > MAX_BODY_BYTES:
+                    raise YouthApiError("too_large", "response too large")
+                raw = blob.decode("utf-8", errors="replace")
                 ctype = resp.headers.get("Content-Type", "")
             return _parse_body(raw, ctype)
         except HTTPError as exc:
@@ -433,11 +443,70 @@ def _matches_query(item, query, source="policy"):
     return all(token in blob for token in query.lower().split() if len(token) >= 2)
 
 
+def _run_deadline(fn, seconds, *args):
+    """urlopen timeout이 큰 본문에서 안 먹을 때를 대비한 하드 제한."""
+    box = {}
+
+    def worker():
+        try:
+            box["value"] = fn(*args)
+        except Exception as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    if thread.is_alive():
+        raise YouthApiError("timeout", "시간 초과")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
 def fetch_source_page(source):
+    # getContent 목록은 항목 1개도 본문이 약 1MB라 Vercel에서 자주 멈춘다.
+    if source == "content":
+        raise YouthApiError("skipped", "콘텐츠 목록 응답이 커서 고르기에서 생략")
     meta = SOURCE_META[source]
     params = policy_list_params(1)
+    params["pageSize"] = SOURCE_PAGE_SIZE.get(source, PAGE_SIZE)
     payload = youth_get(meta["url"], params, meta["key"])
     return extract_items(payload)
+
+
+def _filter_source(source, raw_items, query, age, city, limit=8):
+    rows = []
+    kept = 0
+    for item in raw_items:
+        if not _matches_query(item, query, source):
+            continue
+        ok_age, why_age = age_ok(item, age) if source == "policy" else (True, "해당 없음")
+        if not ok_age:
+            continue
+        ok_region, why_region = region_ok(item, city, source)
+        if not ok_region:
+            continue
+        card = summarize(item, source)
+        if not card["id"]:
+            continue
+        card["age_check"] = why_age
+        card["region_check"] = why_region
+        kept += 1
+        if len(rows) < limit:
+            rows.append(card)
+    return rows, kept
+
+
+def _load_one_source(source, query, age, city):
+    raw_items = fetch_source_page(source)
+    rows, kept = _filter_source(source, raw_items, query, age, city)
+    return {
+        "source": source,
+        "rows": rows,
+        "fetched": len(raw_items),
+        "kept": kept,
+        "error": "",
+    }
 
 
 def list_catalog(query="", age=None, city="", sources=None):
@@ -452,35 +521,56 @@ def list_catalog(query="", age=None, city="", sources=None):
         "region": city,
         "sources": list(wanted),
     }
+    box = {}
+
+    def run(source):
+        try:
+            box[source] = _run_deadline(
+                _load_one_source, SOURCE_DEADLINE, source, query, age, city
+            )
+        except YouthApiError as exc:
+            box[source] = {
+                "source": source,
+                "rows": [],
+                "fetched": 0,
+                "kept": 0,
+                "error": exc.code,
+            }
+        except Exception as exc:
+            box[source] = {
+                "source": source,
+                "rows": [],
+                "fetched": 0,
+                "kept": 0,
+                "error": "error",
+            }
+            print("YOUTH_SOURCE_ERROR:", source, repr(exc))
+
+    threads = []
+    for source in wanted:
+        thread = threading.Thread(target=run, args=(source,), daemon=True)
+        thread.start()
+        threads.append(thread)
+    wall = SOURCE_DEADLINE + 0.4
+    for thread in threads:
+        thread.join(wall)
+
     rows = []
     stats = {}
     for source in wanted:
-        try:
-            raw_items = fetch_source_page(source)
-        except YouthApiError as exc:
-            stats[source] = {"fetched": 0, "kept": 0, "error": exc.code}
-            continue
-        kept = 0
-        shown = 0
-        for item in raw_items:
-            if not _matches_query(item, query, source):
-                continue
-            ok_age, why_age = age_ok(item, age) if source == "policy" else (True, "해당 없음")
-            if not ok_age:
-                continue
-            ok_region, why_region = region_ok(item, city, source)
-            if not ok_region:
-                continue
-            card = summarize(item, source)
-            if not card["id"]:
-                continue
-            card["age_check"] = why_age
-            card["region_check"] = why_region
-            kept += 1
-            if shown < 12:
-                rows.append(card)
-                shown += 1
-        stats[source] = {"fetched": len(raw_items), "kept": kept, "error": ""}
+        row = box.get(source) or {
+            "source": source,
+            "rows": [],
+            "fetched": 0,
+            "kept": 0,
+            "error": "timeout",
+        }
+        rows.extend(row["rows"])
+        stats[source] = {
+            "fetched": row["fetched"],
+            "kept": row["kept"],
+            "error": row["error"],
+        }
     return rows, sent, stats
 
 
@@ -573,7 +663,8 @@ class handler(BaseHTTPRequestHandler):
         try:
             if item_id:
                 detail_source = source if source in SOURCE_META else "policy"
-                _send(self, 200, {"item": policy_detail(item_id, detail_source)})
+                item = _run_deadline(policy_detail, SOURCE_DEADLINE + 1.0, item_id, detail_source)
+                _send(self, 200, {"item": item})
             else:
                 sources = tuple(SOURCE_META) if source == "all" else (source,)
                 items, sent, stats = list_catalog(query=query, age=age, city=city, sources=sources)

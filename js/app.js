@@ -388,13 +388,13 @@ function renderYouthList(items) {
   youthList.hidden = false;
 }
 
-async function fetchYouthSource(source, q, profile) {
+async function fetchYouthSource(source, q, profile, timeoutMs = 6000) {
   const params = new URLSearchParams({ source });
   if (q) params.set('q', q);
   if (profile.age != null) params.set('age', String(profile.age));
   if (profile.region) params.set('region', profile.region);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`/api/policies?${params.toString()}`, { signal: controller.signal });
     const data = await res.json().catch(() => ({}));
@@ -415,39 +415,63 @@ async function fetchYouthSource(source, q, profile) {
   }
 }
 
+function applyYouthResults(results, profile) {
+  const items = results.flatMap((row) => row.items);
+  renderYouthList(items);
+  const labels = { policy: '정책', content: '콘텐츠', space: '청년공간' };
+  const bits = results.map((row) => {
+    if (row.error) return `${labels[row.source]} 생략(${row.error})`;
+    return `${labels[row.source]} ${row.kept}`;
+  });
+  const cond = [profile.age != null ? `나이 ${profile.age}` : '', profile.region ? `거주 ${profile.region}` : '']
+    .filter(Boolean).join(' · ');
+  if (!items.length && results.every((row) => row.error)) {
+    setYouthStatus('온통청년에 연결하지 못했습니다. 잠시 후 다시 시도하거나 공고문을 붙여넣어 주세요.');
+  } else if (!items.length) {
+    setYouthStatus('조건에 맞는 항목이 없습니다. 나이·거주를 확인하거나 검색어를 바꿔 보세요.');
+  } else {
+    setYouthStatus(`${cond ? cond + ' 기준 · ' : ''}${bits.join(' · ')}. 고르면 아래 입력창에 채워집니다.`);
+  }
+}
+
 async function loadYouthPolicies() {
-  if (!youthLoadBtn) return;
+  if (!youthLoadBtn || youthLoadBtn.disabled) return;
   const q = (youthQuery && youthQuery.value.trim()) || '';
   youthLoadBtn.disabled = true;
   const profile = readProfile();
-  setYouthStatus('온통청년에서 정책·콘텐츠·청년공간을 각각 찾는 중입니다…');
-  try {
-    const results = await Promise.all([
-      fetchYouthSource('policy', q, profile),
-      fetchYouthSource('content', q, profile),
-      fetchYouthSource('space', q, profile),
-    ]);
-    const items = results.flatMap((row) => row.items);
-    renderYouthList(items);
-    const labels = { policy: '정책', content: '콘텐츠', space: '청년공간' };
-    const bits = results.map((row) => {
-      if (row.error) return `${labels[row.source]} 실패(${row.error})`;
-      return `${labels[row.source]} ${row.kept}`;
-    });
-    const cond = [profile.age != null ? `나이 ${profile.age}` : '', profile.region ? `거주 ${profile.region}` : '']
-      .filter(Boolean).join(' · ');
-    if (!items.length && results.every((row) => row.error)) {
-      setYouthStatus('온통청년에 연결하지 못했습니다. 잠시 후 다시 시도하거나 공고문을 붙여넣어 주세요.');
-    } else if (!items.length) {
-      setYouthStatus('조건에 맞는 항목이 없습니다. 나이·거주를 확인하거나 검색어를 바꿔 보세요.');
-    } else {
-      setYouthStatus(`${cond ? cond + ' 기준 · ' : ''}${bits.join(' · ')}. 고르면 아래 입력창에 채워집니다.`);
-    }
-  } catch (err) {
-    renderYouthList([]);
-    setYouthStatus(err.message || '온통청년 목록을 가져오지 못했습니다.');
-  } finally {
+  const bySource = {};
+  let settled = false;
+
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(watchdog);
+    const results = ['policy', 'space'].map((source) => (
+      bySource[source] || { source, items: [], kept: 0, error: '시간 초과' }
+    ));
+    applyYouthResults(results, profile);
     youthLoadBtn.disabled = false;
+  };
+
+  const watchdog = setTimeout(finish, 8000);
+  setYouthStatus('온통청년 정책을 찾는 중입니다. 청년공간은 되면 덧붙입니다.');
+
+  try {
+    bySource.policy = await fetchYouthSource('policy', q, profile, 6000);
+    if (!settled) {
+      renderYouthList(bySource.policy.items);
+      if (bySource.policy.items.length) {
+        setYouthStatus('정책 목록입니다. 청년공간은 이어서 붙입니다.');
+      }
+    }
+
+    bySource.space = await fetchYouthSource('space', q, profile, 4000);
+  } catch (err) {
+    if (!bySource.policy) {
+      bySource.policy = { source: 'policy', items: [], kept: 0, error: err.message || '실패' };
+    }
+  } finally {
+    finish();
   }
 }
 
