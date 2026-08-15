@@ -257,76 +257,291 @@ def region_score(item):
     return 5, "복수 지역"
 
 
-def summarize(item, region_label):
-    expl = str(item.get("plcyExplnCn") or item.get("plcySprtCn") or "").strip()
+# 시·군 이름 → 우편번호 접두. 요청 zipCd 가 아니라 응답 필터용.
+CITY_ZIP_PREFIXES = {
+    "서울": ("11",),
+    "부산": ("26",),
+    "대구": ("27",),
+    "인천": ("28",),
+    "광주": ("29",),
+    "대전": ("30",),
+    "울산": ("31",),
+    "세종": ("36",),
+    "수원": ("162", "441"),
+    "고양": ("412",),
+    "용인": ("168", "446"),
+    "창원": ("511", "641"),
+    "청주": ("361", "431"),
+    "전주": ("5211", "5214", "4511"),
+    "천안": ("310", "330"),
+    "제주": ("50", "63"),
+    "군산": ("52130", "45130"),
+    "익산": ("52180", "45180"),
+    "목포": ("586",),
+    "포항": ("376", "790"),
+    "김해": ("508", "621"),
+}
+
+SOURCE_META = {
+    "policy": {"url": POLICY_URL, "key": "YOUTH_API_KEY", "label": "정책"},
+    "content": {"url": CONTENT_URL, "key": "YOUTH_CONTENT_API_KEY", "label": "콘텐츠"},
+    "space": {"url": SPACE_URL, "key": "YOUTH_CENTER_API_KEY", "label": "청년공간"},
+}
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def age_ok(item, age):
+    """응답의 sprtTrgt* 필드로 나이를 검사. 목록 API는 나이 쿼리를 무시한다(실측)."""
+    if age is None:
+        return True, "나이 미적용"
+    mn = _safe_int(item.get("sprtTrgtMinAge"), 0)
+    mx = _safe_int(item.get("sprtTrgtMaxAge"), 0)
+    if mn and age < mn:
+        return False, "최소연령 %s" % mn
+    if mx and mx < 99 and age > mx:
+        return False, "최대연령 %s" % mx
+    if mn or mx:
+        return True, "연령 %s~%s" % (mn or "?", mx or "?")
+    return True, "연령 제한 없음"
+
+
+def city_prefixes(city):
+    city = (city or "").strip()
+    if not city:
+        return ()
+    if city in CITY_ZIP_PREFIXES:
+        return CITY_ZIP_PREFIXES[city]
+    for name, prefixes in CITY_ZIP_PREFIXES.items():
+        if name in city or city in name:
+            return prefixes
+    return ()
+
+
+def region_ok(item, city, source):
+    """응답 필드로 거주 시·군을 검사. getPlcy zipCd·getSpace ctpvCd 요청은 거의 무시된다(실측)."""
+    city = (city or "").strip()
+    if not city:
+        return True, "거주 미적용"
+
+    if source == "policy":
+        codes = re.findall(r"\d{5}", str(item.get("zipCd") or ""))
+        prefixes = city_prefixes(city)
+        text = _blob(item)
+        if city in text:
+            return True, "본문·제목에 시·군명"
+        if len(codes) >= 8:
+            return True, "전국(우편번호 다수)"
+        if not codes:
+            return True, "지역 미지정"
+        if prefixes and any(code.startswith(prefixes) for code in codes):
+            return True, "우편번호 일치"
+        return False, "거주 시·군과 우편번호 불일치"
+
+    text = " ".join(
+        str(item.get(k) or "")
+        for k in (
+            "pstTtl",
+            "pstWholCn",
+            "pstSeNm",
+            "cntrNm",
+            "cntrAddr",
+            "cntrDaddr",
+            "stdgCtpvCdNm",
+            "stdgSggCdNm",
+        )
+    )
+    if city in text:
+        return True, "주소·제목에 시·군명"
+    return False, "주소·제목에 시·군 없음"
+
+
+def summarize(item, source="policy"):
+    if source == "content":
+        title = str(item.get("pstTtl") or "제목 없음")
+        expl = str(item.get("pstWholCn") or "").strip()
+        inst = str(item.get("pstSeNm") or "")
+        uid = str(item.get("pstSn") or "")
+        label = "콘텐츠"
+    elif source == "space":
+        title = str(item.get("cntrNm") or "이름 없음")
+        expl = (str(item.get("cntrAddr") or "") + " " + str(item.get("cntrDaddr") or "")).strip()
+        inst = str(item.get("stdgSggCdNm") or item.get("stdgCtpvCdNm") or "")
+        uid = str(item.get("cntrSn") or "")
+        label = inst or "청년공간"
+    else:
+        title = str(item.get("plcyNm") or "제목 없음")
+        expl = str(item.get("plcyExplnCn") or item.get("plcySprtCn") or "").strip()
+        inst = str(item.get("sprvsnInstCdNm") or "")
+        uid = str(item.get("plcyNo") or "")
+        _, label = region_score(item)
     if len(expl) > 140:
         expl = expl[:140] + "…"
     return {
-        "id": str(item.get("plcyNo") or ""),
-        "title": str(item.get("plcyNm") or "제목 없음"),
+        "id": uid,
+        "source": source,
+        "title": title,
         "summary": expl,
-        "region": region_label,
-        "inst": str(item.get("sprvsnInstCdNm") or ""),
+        "region": label,
+        "inst": inst,
     }
 
 
-def flatten(item):
-    lines = ["[출처] 온통청년 getPlcy"]
-    age_min, age_max = item.get("sprtTrgtMinAge"), item.get("sprtTrgtMaxAge")
-    if age_min or age_max:
-        lines.append("연령: %s~%s" % (age_min or "?", age_max or "?"))
-    for key, label in TEXT_FIELDS:
-        value = str(item.get(key) or "").strip()
-        if value:
-            lines.append("%s: %s" % (label, value))
-    text = "\n".join(lines).strip()
+def flatten(item, source="policy"):
+    if source == "content":
+        lines = ["[출처] 온통청년 getContent", str(item.get("pstTtl") or ""), str(item.get("pstWholCn") or "")]
+    elif source == "space":
+        lines = [
+            "[출처] 온통청년 getSpace",
+            "시설명: %s" % (item.get("cntrNm") or ""),
+            "주소: %s %s" % (item.get("cntrAddr") or "", item.get("cntrDaddr") or ""),
+            "전화: %s" % (item.get("cntrTelno") or ""),
+        ]
+    else:
+        lines = ["[출처] 온통청년 getPlcy"]
+        age_min, age_max = item.get("sprtTrgtMinAge"), item.get("sprtTrgtMaxAge")
+        if age_min or age_max:
+            lines.append("연령: %s~%s" % (age_min or "?", age_max or "?"))
+        for key, label in TEXT_FIELDS:
+            value = str(item.get(key) or "").strip()
+            if value:
+                lines.append("%s: %s" % (label, value))
+    text = "\n".join(line for line in lines if str(line).strip()).strip()
     if len(text) > MAX_TEXT_LEN:
         text = text[: MAX_TEXT_LEN - 1] + "…"
     return text
 
 
-def _matches_query(item, query):
+def _matches_query(item, query, source="policy"):
     if not query:
         return True
-    blob = _blob(item).lower()
+    if source == "policy":
+        blob = _blob(item).lower()
+    elif source == "content":
+        blob = ("%s %s" % (item.get("pstTtl") or "", item.get("pstWholCn") or "")).lower()
+    else:
+        blob = ("%s %s %s" % (
+            item.get("cntrNm") or "",
+            item.get("cntrAddr") or "",
+            item.get("stdgSggCdNm") or "",
+        )).lower()
     return all(token in blob for token in query.lower().split() if len(token) >= 2)
 
 
-def fetch_policy_page(page_num=1):
-    payload = youth_get(POLICY_URL, policy_list_params(page_num), "YOUTH_API_KEY")
+def fetch_source_page(source):
+    meta = SOURCE_META[source]
+    params = policy_list_params(1)
+    payload = youth_get(meta["url"], params, meta["key"])
     return extract_items(payload)
 
 
-def list_policies(query, scope):
-    # 참고 서비스는 전 페이지를 캐시한다. Vercel 한도 안에서는 1페이지.
-    params = policy_list_params(1)
-    items = extract_items(youth_get(POLICY_URL, params, "YOUTH_API_KEY"))
+def list_catalog(query="", age=None, city="", sources=None):
+    wanted = sources or ("policy", "content", "space")
+    sent = {
+        "pageNum": 1,
+        "pageSize": PAGE_SIZE,
+        "pageType": "1",
+        "rtnType": "json",
+        "note": "나이·거주는 요청 파라미터가 아니라 응답 필터로 적용(실측: getPlcy/getSpace 쿼리 무시)",
+        "age": age,
+        "region": city,
+        "sources": list(wanted),
+    }
     rows = []
-    for item in items:
-        if not _matches_query(item, query):
+    stats = {}
+    for source in wanted:
+        try:
+            raw_items = fetch_source_page(source)
+        except YouthApiError as exc:
+            stats[source] = {"fetched": 0, "kept": 0, "error": exc.code}
             continue
-        score, label = region_score(item)
-        if scope == "gunsan" and score < 50:
-            continue
-        if scope == "jeonbuk" and score < 30:
-            continue
-        card = summarize(item, label)
-        if not card["id"]:
-            continue
-        rows.append(card)
-    return rows[:30]
+        kept = 0
+        shown = 0
+        for item in raw_items:
+            if not _matches_query(item, query, source):
+                continue
+            ok_age, why_age = age_ok(item, age) if source == "policy" else (True, "해당 없음")
+            if not ok_age:
+                continue
+            ok_region, why_region = region_ok(item, city, source)
+            if not ok_region:
+                continue
+            card = summarize(item, source)
+            if not card["id"]:
+                continue
+            card["age_check"] = why_age
+            card["region_check"] = why_region
+            kept += 1
+            if shown < 12:
+                rows.append(card)
+                shown += 1
+        stats[source] = {"fetched": len(raw_items), "kept": kept, "error": ""}
+    return rows, sent, stats
 
 
-def policy_detail(plcy_no):
-    payload = youth_get(POLICY_URL, policy_detail_params(plcy_no), "YOUTH_API_KEY")
+def list_policies(query, scope):
+    city = ""
+    if scope == "gunsan":
+        city = "군산"
+    rows, _, _ = list_catalog(query=query, city=city, sources=("policy",))
+    return rows
+
+
+def policy_detail(item_id, source="policy"):
+    meta = SOURCE_META.get(source) or SOURCE_META["policy"]
+    if source == "content":
+        params = {"pageType": "2", "pstSn": item_id, "rtnType": "json"}
+    elif source == "space":
+        params = {"pageType": 2, "plcSn": item_id, "rtnType": "json"}
+    else:
+        params = policy_detail_params(item_id)
+    payload = youth_get(meta["url"], params, meta["key"])
     items = extract_items(payload)
     if not items:
-        raise YouthApiError("not_found", "policy not found")
+        raise YouthApiError("not_found", "item not found")
     item = items[0]
-    _, label = region_score(item)
-    card = summarize(item, label)
-    card["text"] = flatten(item)
+    card = summarize(item, source)
+    card["text"] = flatten(item, source)
     return card
+
+
+def run_cross_check():
+    """나이·거주가 세 API 응답 필터에 반영되는지 콘솔에서 확인."""
+    cases = [
+        {"age": 17, "region": "서울"},
+        {"age": 24, "region": "서울"},
+        {"age": 24, "region": "부산"},
+        {"age": 50, "region": "서울"},
+    ]
+    print("=== 교차검증: 요청 나이·거주 → 세 API 응답 필터 ===")
+    print("참고: getPlcy/getContent/getSpace 목록은 나이·지역 쿼리를 거의 무시한다.")
+    print("      그래서 응답의 sprtTrgt* / zipCd / 주소 필드로 거른다.\n")
+    baseline, sent, stats = list_catalog()
+    print("필터 없음  fetched", {k: v["fetched"] for k, v in stats.items()}, "kept", len(baseline))
+    print("보낸 파라미터", sent)
+    for case in cases:
+        rows, _, st = list_catalog(age=case["age"], city=case["region"])
+        by_src = {}
+        for row in rows:
+            by_src[row["source"]] = by_src.get(row["source"], 0) + 1
+        print(
+            "age=%s region=%s → kept %s %s  fetched=%s"
+            % (case["age"], case["region"], len(rows), by_src, {k: v["fetched"] for k, v in st.items()})
+        )
+        for row in rows[:2]:
+            print("   - [%s] %s (%s / %s)" % (row["source"], row["title"][:40], row.get("age_check"), row.get("region_check")))
+    # 대조: 17세는 24세보다 정책 수가 같거나 적어야 한다
+    young, _, _ = list_catalog(age=17, city="서울")
+    mid, _, _ = list_catalog(age=24, city="서울")
+    young_p = sum(1 for r in young if r["source"] == "policy")
+    mid_p = sum(1 for r in mid if r["source"] == "policy")
+    print("\n나이 필터 정책 수  17세=%s  24세=%s  (17세 <= 24세 이어야 함)" % (young_p, mid_p))
+    print("PASS" if young_p <= mid_p else "FAIL 나이 필터")
 
 
 def _send(handler, status, payload):
@@ -342,18 +557,32 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         qs = parse_qs(urlparse(self.path).query)
-        plcy_no = (qs.get("id") or [""])[0].strip()
+        item_id = (qs.get("id") or [""])[0].strip()
         query = (qs.get("q") or [""])[0].strip()
-        scope = (qs.get("scope") or ["all"])[0].strip().lower()
-        if scope not in {"gunsan", "jeonbuk", "all"}:
-            scope = "all"
+        source = (qs.get("source") or ["all"])[0].strip().lower()
+        if source not in {"policy", "content", "space", "all"}:
+            source = "all"
+        age_raw = (qs.get("age") or [""])[0].strip()
+        try:
+            age = int(age_raw) if age_raw else None
+        except ValueError:
+            age = None
+        city = re.sub(r"\s+", " ", (qs.get("region") or [""])[0]).strip()[:30]
+        debug = (qs.get("debug") or [""])[0] in {"1", "true", "yes"}
 
         try:
-            if plcy_no:
-                _send(self, 200, {"item": policy_detail(plcy_no)})
+            if item_id:
+                detail_source = source if source in SOURCE_META else "policy"
+                _send(self, 200, {"item": policy_detail(item_id, detail_source)})
             else:
-                items = list_policies(query, scope)
-                _send(self, 200, {"items": items, "count": len(items)})
+                sources = tuple(SOURCE_META) if source == "all" else (source,)
+                items, sent, stats = list_catalog(query=query, age=age, city=city, sources=sources)
+                payload = {"items": items, "count": len(items), "stats": stats, "applied": {
+                    "age": age, "region": city, "sources": list(sources),
+                }}
+                if debug:
+                    payload["request"] = sent
+                _send(self, 200, payload)
         except YouthApiError as exc:
             if exc.code == "missing_key":
                 _send(self, 500, {
@@ -377,3 +606,7 @@ class handler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         print("%s - %s" % (self.address_string(), format % args))
+
+
+if __name__ == "__main__":
+    run_cross_check()

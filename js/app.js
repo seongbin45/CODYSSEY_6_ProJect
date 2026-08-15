@@ -296,12 +296,13 @@ function renderYouthList(items) {
     const li = document.createElement('li');
     const button = document.createElement('button');
     button.type = 'button';
+    const sourceLabel = { policy: '정책', content: '콘텐츠', space: '청년공간' }[item.source] || '정책';
     button.innerHTML = `
       <strong>${esc(item.title || '제목 없음')}</strong>
-      <span class="meta">${esc([item.region, item.inst].filter(Boolean).join(' · '))}</span>
+      <span class="meta">${esc([sourceLabel, item.region, item.inst].filter(Boolean).join(' · '))}</span>
       ${item.summary ? `<p class="snippet">${esc(item.summary)}</p>` : ''}
     `;
-    button.addEventListener('click', () => pickYouthPolicy(item.id, button));
+    button.addEventListener('click', () => pickYouthPolicy(item.id, item.source || 'policy', button));
     li.appendChild(button);
     youthList.appendChild(li);
   });
@@ -312,10 +313,13 @@ async function loadYouthPolicies() {
   if (!youthLoadBtn) return;
   const q = (youthQuery && youthQuery.value.trim()) || '';
   youthLoadBtn.disabled = true;
-  setYouthStatus('온통청년에서 정책을 찾는 중입니다.');
+  const profile = readProfile();
+  setYouthStatus('온통청년 정책·콘텐츠·청년공간을 조건에 맞춰 찾는 중입니다.');
   try {
-    const params = new URLSearchParams({ scope: 'all' });
+    const params = new URLSearchParams({ source: 'all' });
     if (q) params.set('q', q);
+    if (profile.age != null) params.set('age', String(profile.age));
+    if (profile.region) params.set('region', profile.region);
     const res = await fetch(`/api/policies?${params.toString()}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -323,9 +327,17 @@ async function loadYouthPolicies() {
     }
     const items = Array.isArray(data.items) ? data.items : [];
     renderYouthList(items);
+    const stats = data.stats || {};
+    const bits = ['정책', '콘텐츠', '청년공간'].map((label, i) => {
+      const key = ['policy', 'content', 'space'][i];
+      const row = stats[key] || {};
+      return `${label} ${row.kept ?? 0}`;
+    });
+    const cond = [profile.age != null ? `나이 ${profile.age}` : '', profile.region ? `거주 ${profile.region}` : '']
+      .filter(Boolean).join(' · ');
     setYouthStatus(items.length
-      ? `${items.length}건입니다. 고르면 아래 입력창에 채워집니다.`
-      : '조건에 맞는 정책이 없습니다. 검색어를 바꾸거나 직접 붙여넣어 주세요.');
+      ? `${cond ? cond + ' 기준 · ' : ''}${bits.join(' · ')}건. 고르면 아래 입력창에 채워집니다.`
+      : '조건에 맞는 항목이 없습니다. 나이·거주를 확인하거나 검색어를 바꿔 보세요.');
   } catch (err) {
     renderYouthList([]);
     setYouthStatus(err.message || '온통청년 목록을 가져오지 못했습니다.');
@@ -334,12 +346,12 @@ async function loadYouthPolicies() {
   }
 }
 
-async function pickYouthPolicy(id, button) {
+async function pickYouthPolicy(id, source, button) {
   if (!id) return;
   if (button) button.disabled = true;
-  setYouthStatus('선택한 정책의 상세를 불러오는 중입니다.');
+  setYouthStatus('선택한 항목의 상세를 불러오는 중입니다.');
   try {
-    const res = await fetch(`/api/policies?id=${encodeURIComponent(id)}`);
+    const res = await fetch(`/api/policies?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source || 'policy')}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data.error || '정책 상세를 가져오지 못했습니다.');
