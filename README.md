@@ -2,7 +2,8 @@
 
 > 청년 정책 공고문을 붙여넣으면, **대상 여부부터** 확인해 주는 웹 서비스
 
-🔗 **배포 URL:** `https://<배포후-기입>.vercel.app`  
+🔗 **배포 URL:** https://codyssey-6-pro-ject.vercel.app/  
+🔗 **확인하기:** https://codyssey-6-pro-ject.vercel.app/#check  
 🔗 **GitHub:** https://github.com/seongbin45/CODYSSEY_6_ProJect
 
 <!-- TODO: images/screenshot.png 추가 후 아래 주석 해제 -->
