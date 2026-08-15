@@ -54,9 +54,24 @@ function esc(s) {
 function applyFont() {
   const font = FONTS[state.fontIdx];
   document.documentElement.style.fontSize = font.px + "px";
-  els.fontBtn.textContent = "가 " + font.label;
-  els.fontBtn.setAttribute("aria-label", "글씨 크기: " + font.label + ". 누르면 다음 크기로 바뀝니다.");
+  if (els.fontBtn) {
+    els.fontBtn.textContent = "가 " + font.label;
+    els.fontBtn.setAttribute("aria-label", "글씨 크기: " + font.label + ". 누르면 다음 크기로 바뀝니다.");
+  }
   try { localStorage.setItem("doenayo-font", font.label); } catch (_) { /* ignore */ }
+}
+
+function cycleFont() {
+  state.fontIdx = (state.fontIdx + 1) % FONTS.length;
+  document.documentElement.style.fontSize = FONTS[state.fontIdx].px + "px";
+  applyFont();
+}
+
+function scrollChat() {
+  const el = els.chatLog;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+  requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
 }
 
 function showScreen(name) {
@@ -180,7 +195,7 @@ function evaluate(p, answers) {
     const ok = p.disability.includes(a.disability);
     push(ok ? "yes" : "no", `장애 등록 본인 · 고른 답 ${DISABILITY_LABEL[a.disability]}`);
   }
-  push("unknown", "예산 소진·서류 심사 등 남은 조건은 기관에서 확인해야 합니다.");
+  checks.push({ match: "note", text: "예산 소진·서류 심사 등 남은 조건은 기관에서 확인해야 합니다." });
 
   const reason = worst === "yes"
     ? "고른 답으로 보면 공개된 핵심 자격에 모두 들어갑니다."
@@ -224,7 +239,7 @@ function appendBubble(m) {
     div.innerHTML = `<p>${esc(m.text)}</p>${m.hint ? `<p class="bubble-hint">${esc(m.hint)}</p>` : ""}`;
   }
   els.chatLog.appendChild(div);
-  els.chatLog.scrollTop = els.chatLog.scrollHeight;
+  scrollChat();
 }
 
 function removeLastBubbles(count) {
@@ -266,6 +281,7 @@ function renderChoices() {
   } else {
     els.multiBtn.hidden = true;
   }
+  scrollChat();
 }
 
 function ageLabel() {
@@ -319,7 +335,7 @@ function openDetail(id) {
   els.detailTitle.textContent = p.title;
   els.detailSummary.textContent = p.summary;
   els.detailChecks.innerHTML = ev.checks.map((c) => {
-    const chip = CHIP[c.match];
+    const chip = CHIP[c.match] || CHIP.note;
     return `<li><span class="stamp" style="background:${chip.bg};color:${chip.color}">${esc(chip.label)}</span><span>${esc(c.text)}</span></li>`;
   }).join("");
   els.detailDocs.innerHTML = (p.docs || []).map((d) => `<li>${esc(d)}</li>`).join("")
@@ -347,10 +363,7 @@ function bind() {
   els.restartBtn.addEventListener("click", startChat);
   els.resultGuideBtn.addEventListener("click", goGuide);
   els.backResultBtn.addEventListener("click", () => { renderResults(); });
-  els.fontBtn.addEventListener("click", () => {
-    state.fontIdx = (state.fontIdx + 1) % FONTS.length;
-    applyFont();
-  });
+  els.fontBtn.addEventListener("click", cycleFont);
 }
 
 function restoreFont() {

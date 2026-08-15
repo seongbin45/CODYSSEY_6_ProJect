@@ -220,6 +220,7 @@ const CHIP = {
   yes: { label: "됩니다", bg: "#e4f6ec", color: "#0b7a4b" },
   unknown: { label: "확인 필요", bg: "#fff3e0", color: "#b4700a" },
   no: { label: "어렵습니다", bg: "#fdeaea", color: "#c23434" },
+  note: { label: "참고", bg: "#eef0f4", color: "#6b7280" },
 };
 
 const FONTS = [
