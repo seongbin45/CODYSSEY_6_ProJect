@@ -146,7 +146,9 @@ vercel dev
 |---|---|---|
 | `GEMINI_API_KEY` | Google Gemini API 인증 키 | https://aistudio.google.com/apikey |
 | `GEMINI_MODEL` | (선택) 사용할 모델명. 없으면 `gemini-2.5-flash` 부터 자동으로 내림 | AI Studio |
-| `YOUTH_API_KEY` | (선택) 온통청년 정책 목록. 없으면 붙여넣기만 사용 | https://www.youthcenter.go.kr 개발자센터 |
+| `YOUTH_API_KEY` | (선택) 온통청년 **정책** `getPlcy`. 없으면 붙여넣기만 사용 | 온통청년 개발자센터 / 군산 대시보드 secrets.toml |
+| `YOUTH_CONTENT_API_KEY` | (선택) 온통청년 콘텐츠 `getContent` | 같은 곳 |
+| `YOUTH_CENTER_API_KEY` | (선택) 온통청년 청년공간 `getSpace` | 같은 곳 |
 
 ### 로컬
 
@@ -154,8 +156,12 @@ vercel dev
 
 ```
 GEMINI_API_KEY=your_key_here
-YOUTH_API_KEY=your_youth_key_here
+YOUTH_API_KEY=your_youth_policy_key
+YOUTH_CONTENT_API_KEY=your_youth_content_key
+YOUTH_CENTER_API_KEY=your_youth_center_key
 ```
+
+온통청년 키 이름은 군산 대시보드 `.streamlit/secrets.toml` 과 같습니다. 정책 목록은 `YOUTH_API_KEY` 만 있으면 됩니다.
 
 ### 배포 (Vercel)
 

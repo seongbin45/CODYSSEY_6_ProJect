@@ -1,28 +1,48 @@
-"""온통청년 정책 목록·상세.
+"""온통청년 Open API — 군산 대시보드 finfit_youth 클라이언트를 Vercel용으로 옮긴 버전.
 
-참고: other/GunSan-youth-dashboard-KOSIS-main
-  - GET https://www.youthcenter.go.kr/go/ythip/getPlcy
-  - 인증 파라미터 apiKeyNm
-  - 군산/전북 가점은 zipCd·기관명·본문 휴리스틱 (finfit_youth/benefits_matcher.py)
+참고 코드
+  other/GunSan-youth-dashboard-KOSIS-main/.../finfit_youth/client.py
+  other/GunSan-youth-dashboard-KOSIS-main/.../finfit_youth/service.py
+  other/GunSan-youth-dashboard-KOSIS-main/.../finfit_youth/benefits_matcher.py
+
+엔드포인트 / 인증 (client.py)
+  GET https://www.youthcenter.go.kr/go/ythip/getPlcy     apiKeyNm=YOUTH_API_KEY
+  GET https://www.youthcenter.go.kr/go/ythip/getContent  apiKeyNm=YOUTH_CONTENT_API_KEY
+  GET https://www.youthcenter.go.kr/go/ythip/getSpace    apiKeyNm=YOUTH_CENTER_API_KEY
+  http 는 https 로, :8080 은 제거. 403/5xx 는 재시도.
+
+목록/상세 (service.py)
+  목록  pageType=1, pageNum, pageSize, rtnType=json
+  상세  pageType=2, plcyNo, rtnType=json
 """
 
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from xml.etree import ElementTree
 import json
 import os
 import re
+import time
+from pathlib import Path
 
-POLICY_URL = "https://www.youthcenter.go.kr/go/ythip/getPlcy"
-TIMEOUT = 8
-PAGE_SIZE = 50
+BASE_URL = "https://www.youthcenter.go.kr"
+POLICY_URL = BASE_URL + "/go/ythip/getPlcy"
+CONTENT_URL = BASE_URL + "/go/ythip/getContent"
+SPACE_URL = BASE_URL + "/go/ythip/getSpace"
+
+TIMEOUT = 8.0
+MAX_RETRIES = 3
+BACKOFF = 0.7
+PAGE_SIZE = 100
+MAX_TEXT_LEN = 2000
 
 GUNSAN_HINTS = ("군산", "Gunsan", "GUNSAN")
 JEONBUK_HINTS = ("전북", "전라북", "전북특별", "전북자치")
-JEONBUK_ZIP_PREFIXES = ("52", "45")  # 전북특별자치도 / 개편 전 전북
+JEONBUK_ZIP_PREFIXES = ("52", "45")
+GUNSAN_ZIP_CODES = ("52130", "45130")  # 전북특별자치도 군산시 / 개편 전
 
-# 상세를 공고문 텍스트로 펼칠 때 쓰는 필드 (있는 것만)
 TEXT_FIELDS = (
     ("plcyNm", "사업명"),
     ("plcyKywdNm", "키워드"),
@@ -44,60 +64,156 @@ TEXT_FIELDS = (
     ("refUrlAddr1", "참고 주소"),
 )
 
-MAX_TEXT_LEN = 2000
+
+def _load_dotenv():
+    """config.py 와 같이 KEY=VALUE 를 프로세스 환경에 채운다. 이미 있는 값은 덮지 않는다."""
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[1] / ".env",
+        here.parents[1] / ".env.local",
+        Path.cwd() / ".env",
+    ]
+    seen = set()
+    for path in candidates:
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        for raw in path.read_text(encoding="utf-8-sig").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.lower().startswith("export "):
+                line = line[7:].strip()
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip().strip("'").strip('"')
+            if key and not os.environ.get(key, "").strip():
+                os.environ[key] = val
 
 
-def _send(handler, status, payload):
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(body)))
-    handler.end_headers()
-    handler.wfile.write(body)
+_load_dotenv()
 
 
-def _youth_get(params):
-    key = (os.environ.get("YOUTH_API_KEY") or "").strip()
-    if not key:
-        raise RuntimeError("missing_key")
+def _secret(name, default=""):
+    return (os.environ.get(name) or default).strip()
 
-    query = dict(params)
-    query["apiKeyNm"] = key
-    query.setdefault("rtnType", "json")
-    url = POLICY_URL + "?" + urlencode(query)
-    req = Request(url, headers={"User-Agent": "doenayo/1.0"})
-    try:
-        with urlopen(req, timeout=TIMEOUT) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    except HTTPError as exc:
-        raise RuntimeError("http_%s" % exc.code) from exc
-    except URLError as exc:
-        raise RuntimeError("network") from exc
 
-    text = (raw or "").strip()
+def _safe_url(url):
+    url = (url or "").strip()
+    if url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    return url.replace(":8080", "").rstrip("/")
+
+
+class YouthApiError(Exception):
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(message)
+
+
+def _xml_to_dict(element):
+    children = list(element)
+    if not children:
+        return element.text or ""
+    result = {}
+    for child in children:
+        value = _xml_to_dict(child)
+        if child.tag in result:
+            existing = result[child.tag]
+            if isinstance(existing, list):
+                existing.append(value)
+            else:
+                result[child.tag] = [existing, value]
+        else:
+            result[child.tag] = value
+    return result
+
+
+def _parse_body(text, content_type=""):
+    text = (text or "").strip()
     if not text:
         return {}
-    if text.startswith("{") or text.startswith("["):
+    if "json" in (content_type or "") or text[:1] in "{[":
         return json.loads(text)
-    raise RuntimeError("bad_payload")
+    root = ElementTree.fromstring(text)
+    return _xml_to_dict(root)
 
 
-def _extract_items(payload):
+def youth_get(url, params, key_name):
+    """client.YouthApiClient.get 과 같은 인증·재시도."""
+    endpoint = _safe_url(url)
+    key = _secret(key_name)
+    if not key:
+        raise YouthApiError("missing_key", key_name + " is not set")
+
+    query = dict(params or {})
+    if any(path in endpoint for path in ("/go/ythip/getPlcy", "/go/ythip/getContent", "/go/ythip/getSpace")):
+        query["apiKeyNm"] = key
+        query.pop("openApiVlak", None)
+    else:
+        query["openApiVlak"] = key
+
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            req = Request(
+                endpoint + "?" + urlencode(query),
+                headers={"User-Agent": "doenayo/1.0", "Accept": "application/json"},
+            )
+            with urlopen(req, timeout=TIMEOUT) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                ctype = resp.headers.get("Content-Type", "")
+            return _parse_body(raw, ctype)
+        except HTTPError as exc:
+            last_error = YouthApiError("http_%s" % exc.code, str(exc))
+            if exc.code < 500 and exc.code != 403:
+                raise last_error
+        except URLError as exc:
+            last_error = YouthApiError("network", str(exc.reason if hasattr(exc, "reason") else exc))
+        except Exception as exc:
+            last_error = YouthApiError("parse", str(exc))
+        if attempt < MAX_RETRIES:
+            time.sleep(BACKOFF * attempt)
+    raise last_error or YouthApiError("unknown", "unknown API error")
+
+
+def extract_items(payload):
+    """service.YouthDataService._extract_list 와 동일 키 순서."""
     if isinstance(payload, list):
         return [x for x in payload if isinstance(x, dict)]
     if not isinstance(payload, dict):
         return []
-    for key in ("youthPolicyList", "result", "data", "list", "items"):
+    for key in ("youthPolicyList", "youthContentList", "youthCenterList", "result", "data", "list", "items"):
         value = payload.get(key)
         if isinstance(value, list):
             return [x for x in value if isinstance(x, dict)]
         if isinstance(value, dict):
-            nested = _extract_items(value)
+            nested = extract_items(value)
             if nested:
                 return nested
-    if payload.get("plcyNo") or payload.get("plcyNm"):
+    if payload.get("plcyNo") or payload.get("plcyNm") or payload.get("pstSn"):
         return [payload]
     return []
+
+
+def policy_list_params(page_num=1):
+    return {
+        "pageNum": page_num,
+        "pageSize": PAGE_SIZE,
+        "pageType": "1",
+        "rtnType": "json",
+    }
+
+
+def policy_detail_params(plcy_no):
+    return {
+        "pageType": "2",
+        "plcyNo": plcy_no,
+        "rtnType": "json",
+    }
 
 
 def _blob(item):
@@ -108,14 +224,17 @@ def _blob(item):
         item.get("plcyKywdNm"),
         item.get("sprvsnInstCdNm"),
         item.get("operInstCdNm"),
+        item.get("rgtrInstCdNm"),
         item.get("ptcpPrpTrgtCn"),
         item.get("zipCd"),
-        item.get("rgtrInstCdNm"),
+        item.get("lclsfNm"),
+        item.get("mclsfNm"),
     ]
     return " ".join(str(p) for p in parts if p)
 
 
-def _region_score(item):
+def region_score(item):
+    """benefits_matcher._region_score 와 같은 군산/전북 가점."""
     blob = _blob(item)
     inst = str(item.get("sprvsnInstCdNm") or "") + str(item.get("rgtrInstCdNm") or "")
     zip_cd = str(item.get("zipCd") or "")
@@ -124,6 +243,8 @@ def _region_score(item):
     if any(h in blob or h in inst for h in JEONBUK_HINTS):
         return 35, "전북"
     codes = re.findall(r"\d{5}", zip_cd)
+    if any(c in GUNSAN_ZIP_CODES for c in codes):
+        return 50, "군산"
     if codes and any(c.startswith(JEONBUK_ZIP_PREFIXES) for c in codes):
         return 30, "전북"
     if not zip_cd.strip():
@@ -131,7 +252,7 @@ def _region_score(item):
     return 5, "기타"
 
 
-def _summarize(item, region_label):
+def summarize(item, region_label):
     expl = str(item.get("plcyExplnCn") or item.get("plcySprtCn") or "").strip()
     if len(expl) > 140:
         expl = expl[:140] + "…"
@@ -144,10 +265,9 @@ def _summarize(item, region_label):
     }
 
 
-def _flatten(item):
-    lines = ["[출처] 온통청년 정책 API"]
-    age_min = item.get("sprtTrgtMinAge")
-    age_max = item.get("sprtTrgtMaxAge")
+def flatten(item):
+    lines = ["[출처] 온통청년 getPlcy"]
+    age_min, age_max = item.get("sprtTrgtMinAge"), item.get("sprtTrgtMaxAge")
     if age_min or age_max:
         lines.append("연령: %s~%s" % (age_min or "?", age_max or "?"))
     for key, label in TEXT_FIELDS:
@@ -163,64 +283,36 @@ def _flatten(item):
 def _matches_query(item, query):
     if not query:
         return True
-    blob = (_blob(item) + " " + str(item.get("title") or "")).lower()
+    blob = _blob(item).lower()
     return all(token in blob for token in query.lower().split() if len(token) >= 2)
 
 
+def fetch_policy_page(page_num=1):
+    payload = youth_get(POLICY_URL, policy_list_params(page_num), "YOUTH_API_KEY")
+    return extract_items(payload)
+
+
 def list_policies(query, scope):
-    keywords = []
-    if query:
-        keywords.append(query)
-    elif scope == "gunsan":
-        keywords.append("군산")
-    else:
-        keywords.extend(["군산", "전북"])
-
-    seen = {}
-    last_error = None
-    for keyword in keywords[:2]:
-        try:
-            payload = _youth_get({
-                "pageNum": 1,
-                "pageSize": PAGE_SIZE,
-                "pageType": "1",
-                "keyword": keyword,
-            })
-        except Exception as exc:
-            last_error = exc
-            continue
-        for item in _extract_items(payload):
-            pid = str(item.get("plcyNo") or "")
-            if pid:
-                seen[pid] = item
-
-    if not seen and last_error:
-        raise last_error
-
-    if not seen:
-        payload = _youth_get({
-            "pageNum": 1,
-            "pageSize": PAGE_SIZE,
-            "pageType": "1",
-        })
-        for item in _extract_items(payload):
-            pid = str(item.get("plcyNo") or "")
-            if pid:
-                seen[pid] = item
-
+    # 참고 서비스는 전 페이지를 캐시한다. Vercel 한도 안에서는 1페이지.
+    # getPlcy 는 zipCd 5자리만 받는다. 52130 = 군산시 (실측).
+    params = policy_list_params(1)
+    if scope in {"gunsan", "jeonbuk"}:
+        params["zipCd"] = "52130"
+    items = extract_items(youth_get(POLICY_URL, params, "YOUTH_API_KEY"))
     rows = []
-    for item in seen.values():
+    for item in items:
         if not _matches_query(item, query):
             continue
-        score, label = _region_score(item)
+        score, label = region_score(item)
         if scope == "gunsan" and score < 50:
             continue
         if scope != "all" and score < 30:
             continue
-        card = _summarize(item, label)
+        card = summarize(item, label)
+        if not card["id"]:
+            continue
         card["_score"] = score
         rows.append(card)
-
     rows.sort(key=lambda r: (-r["_score"], r["title"]))
     for row in rows:
         row.pop("_score", None)
@@ -228,20 +320,24 @@ def list_policies(query, scope):
 
 
 def policy_detail(plcy_no):
-    payload = _youth_get({
-        "pageType": "2",
-        "plcyNo": plcy_no,
-    })
-    items = _extract_items(payload)
+    payload = youth_get(POLICY_URL, policy_detail_params(plcy_no), "YOUTH_API_KEY")
+    items = extract_items(payload)
     if not items:
-        raise RuntimeError("not_found")
+        raise YouthApiError("not_found", "policy not found")
     item = items[0]
-    score, label = _region_score(item)
-    card = _summarize(item, label)
-    card["text"] = _flatten(item)
-    card["_score"] = score
-    card.pop("_score", None)
+    _, label = region_score(item)
+    card = summarize(item, label)
+    card["text"] = flatten(item)
     return card
+
+
+def _send(handler, status, payload):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
 
 
 class handler(BaseHTTPRequestHandler):
@@ -260,20 +356,18 @@ class handler(BaseHTTPRequestHandler):
             else:
                 items = list_policies(query, scope)
                 _send(self, 200, {"items": items, "count": len(items)})
-        except RuntimeError as exc:
-            code = str(exc)
-            if code == "missing_key":
+        except YouthApiError as exc:
+            if exc.code == "missing_key":
                 _send(self, 500, {
-                    "error": "온통청년 연결이 준비되지 않았습니다. 공고문을 직접 붙여넣어 주세요.",
+                    "error": "온통청년 연결이 준비되지 않았습니다. Vercel에 YOUTH_API_KEY 를 넣거나 공고문을 붙여넣어 주세요.",
                 })
-                return
-            if code == "not_found":
+            elif exc.code == "not_found":
                 _send(self, 404, {"error": "해당 정책을 찾지 못했습니다."})
-                return
-            print("YOUTH_API_ERROR:", repr(exc))
-            _send(self, 502, {
-                "error": "온통청년에서 목록을 가져오지 못했습니다. 잠시 후 다시 시도하거나 직접 붙여넣어 주세요.",
-            })
+            else:
+                print("YOUTH_API_ERROR:", exc.code, str(exc))
+                _send(self, 502, {
+                    "error": "온통청년에서 목록을 가져오지 못했습니다. 잠시 후 다시 시도하거나 직접 붙여넣어 주세요.",
+                })
         except Exception as exc:
             print("YOUTH_API_ERROR:", repr(exc))
             _send(self, 502, {
