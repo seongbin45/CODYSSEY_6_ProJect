@@ -1,607 +1,443 @@
-// ── 설정 ──────────────────────────────────────────────
-const TIMEOUT_MS = 25000;
-const MIN_LEN = 10;
-const MAX_LEN = 2000;
+const state = {
+  screen: "home",
+  step: 0,
+  answers: {},
+  multiPicked: [],
+  messages: [],
+  detailId: null,
+  filter: "all",
+  fontIdx: 0,
+  liveItems: [],
+};
 
-// 대전청년내일재단 「2026년 대전 청년 서포터즈 모집」 공개 공고 발췌
-const SAMPLE_TEXT = `2026년 대전 청년 서포터즈 모집 공고
+const els = {
+  views: {
+    home: document.getElementById("view-home"),
+    chat: document.getElementById("view-chat"),
+    result: document.getElementById("view-result"),
+    detail: document.getElementById("view-detail"),
+    guide: document.getElementById("view-guide"),
+  },
+  fontBtn: document.getElementById("font-btn"),
+  logoBtn: document.getElementById("logo-btn"),
+  guideBtn: document.getElementById("guide-btn"),
+  startBtn: document.getElementById("start-btn"),
+  guideStartBtn: document.getElementById("guide-start-btn"),
+  backBtn: document.getElementById("back-btn"),
+  progressBar: document.getElementById("progress-bar"),
+  progressLabel: document.getElementById("progress-label"),
+  chatLog: document.getElementById("chat-log"),
+  choiceList: document.getElementById("choice-list"),
+  multiBtn: document.getElementById("multi-btn"),
+  segmentGrid: document.getElementById("segment-grid"),
+  profileLine: document.getElementById("profile-line"),
+  resultHeadline: document.getElementById("result-headline"),
+  resultFilter: document.getElementById("result-filter"),
+  resultList: document.getElementById("result-list"),
+  resultEmpty: document.getElementById("result-empty"),
+  liveStatus: document.getElementById("live-status"),
+  restartBtn: document.getElementById("restart-btn"),
+  resultGuideBtn: document.getElementById("result-guide-btn"),
+  backResultBtn: document.getElementById("back-result-btn"),
+  detailBanner: document.getElementById("detail-banner"),
+  detailMeta: document.getElementById("detail-meta"),
+  detailTitle: document.getElementById("detail-title"),
+  detailSummary: document.getElementById("detail-summary"),
+  detailChecks: document.getElementById("detail-checks"),
+  detailDocs: document.getElementById("detail-docs"),
+  detailDeadline: document.getElementById("detail-deadline"),
+  detailLink: document.getElementById("detail-link"),
+};
 
-1. 모집대상
-  - 대전광역시를 주 생활권으로 하는 청년(만 18세 이상 39세 이하)
-  - 청년의 시각에서 청년정책 홍보 콘텐츠를 기획·제작할 수 있는 자
-
-2. 모집인원
-  - 2개 분야 30명 (블로그 포스팅, 카드뉴스, 숏폼)
-
-3. 활동기간
-  - 2026. 5. 1.(금) ~ 12. 31.(목)
-
-4. 활동내용
-  - 대전청년내일재단 및 청년정책 관련 온라인 콘텐츠 제작·업로드(월 2회)
-  - 대전청년내일재단 및 청년정책 관련 오프라인 행사 참여
-  - 서포터즈 역량 강화 교육 및 멘토링
-
-5. 활동혜택
-  - 소정의 활동비 지급 (활동 목표 미달성 시 미지급)
-  - 수료증 발급 (수료 조건 미달 시 발급 불가)
-  - 서포터즈 역량 강화 교육 수강 및 멘토링
-
-6. 제출서류
-  - 지원서 (이메일 제출)
-
-7. 모집기간
-  - 2026. 3. 23.(월) 00:00 ~ 4. 8.(수) 17:00
-
-8. 문의처
-  - 대전청년내일재단 청년지원센터 / 042-719-8473`;
-
-// ── DOM ───────────────────────────────────────────────
-const form      = document.getElementById('check-form');
-const input     = document.getElementById('policy-input');
-const counter   = document.getElementById('char-count');
-const btn       = document.getElementById('submit-btn');
-const notice    = document.getElementById('notice');
-const result    = document.getElementById('result');
-const sampleBtn = document.getElementById('sample-btn');
-const youthQuery = document.getElementById('youth-query');
-const youthLoadBtn = document.getElementById('youth-load-btn');
-const youthStatus = document.getElementById('youth-status');
-const youthList = document.getElementById('youth-list');
-const userAge = document.getElementById('user-age');
-const userRegion = document.getElementById('user-region');
-const userEmployment = document.getElementById('user-employment');
-const geoHint = document.getElementById('geo-hint');
-const geoBtn = document.getElementById('geo-btn');
-const hamburger = document.querySelector('.hamburger');
-const navLinks  = document.querySelector('.nav-links');
-const themeBtn  = document.getElementById('theme-toggle');
-
-// ── 글자수 카운터 ──────────────────────────────────────
-function updateCounter() {
-  const n = input.value.trim().length;
-  counter.textContent = `${n.toLocaleString()} / ${MAX_LEN.toLocaleString()}자`;
-  counter.classList.toggle('over', n > MAX_LEN);
-}
-
-input.addEventListener('input', updateCounter);
-
-let regionTouched = false;
-if (userRegion) {
-  userRegion.addEventListener('input', () => { regionTouched = true; });
-  userRegion.addEventListener('change', () => { regionTouched = true; });
-}
-
-function setGeoHint(message) {
-  if (geoHint) geoHint.textContent = message || '';
-}
-
-function applyPlace(place, how, force) {
-  if (!userRegion || !place) return false;
-  if (regionTouched && !force) return false;
-  userRegion.value = place;
-  try {
-    localStorage.setItem('doenayo-place', place);
-  } catch (_) { /* ignore */ }
-  setGeoHint(`${how} 기준으로 「${place}」을 넣었습니다. 다르면 직접 바꿔 주세요.`);
-  return true;
-}
-
-async function resolveCoords(lat, lon) {
-  const res = await fetch(`/api/geo?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
-  const data = await res.json().catch(() => ({}));
-  return (data.label || data.region || data.city || '').trim();
-}
-
-function requestBrowserLocation(force) {
-  if (!navigator.geolocation) {
-    setGeoHint('이 브라우저는 위치 권한을 지원하지 않습니다. 시·군을 직접 입력해 주세요.');
-    return Promise.resolve(false);
-  }
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const place = await resolveCoords(pos.coords.latitude, pos.coords.longitude);
-          resolve(applyPlace(place, '기기 위치', force));
-        } catch (_) {
-          setGeoHint('좌표는 받았지만 시·군 이름을 찾지 못했습니다. 직접 입력해 주세요.');
-          resolve(false);
-        }
-      },
-      (err) => {
-        if (err.code === 1) {
-          setGeoHint('위치 권한이 거부되었습니다. IP 추정값을 쓰거나 시·군을 직접 입력해 주세요.');
-        } else if (err.code === 3) {
-          setGeoHint('위치 확인이 오래 걸려 중단했습니다. 시·군을 직접 입력해 주세요.');
-        } else {
-          setGeoHint('기기 위치를 읽지 못했습니다. 시·군을 직접 입력해 주세요.');
-        }
-        resolve(false);
-      },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-    );
-  });
-}
-
-async function suggestRegionFromIp() {
-  if (!userRegion || regionTouched) return false;
-  try {
-    const res = await fetch('/api/geo');
-    const data = await res.json().catch(() => ({}));
-    const place = (data.label || data.region || data.city || '').trim();
-    if (!res.ok || !place) return false;
-    return applyPlace(place, 'IP 추정(참고)', false);
-  } catch (_) {
-    return false;
-  }
-}
-
-async function detectLocation() {
-  if (new URLSearchParams(location.search).get('demo') === '1') return;
-
-  try {
-    const saved = localStorage.getItem('doenayo-place');
-    if (saved && !regionTouched) applyPlace(saved, '이전 입력', false);
-  } catch (_) { /* ignore */ }
-
-  let gps = false;
-  if (navigator.permissions && navigator.permissions.query) {
-    try {
-      const status = await navigator.permissions.query({ name: 'geolocation' });
-      if (status.state === 'granted') {
-        gps = await requestBrowserLocation(true);
-      }
-    } catch (_) { /* Safari 등 */ }
-  }
-  if (!gps) await suggestRegionFromIp();
-}
-
-if (geoBtn) {
-  geoBtn.addEventListener('click', async () => {
-    geoBtn.disabled = true;
-    setGeoHint('위치 권한을 요청합니다…');
-    const ok = await requestBrowserLocation(true);
-    if (!ok) await suggestRegionFromIp();
-    geoBtn.disabled = false;
-  });
-}
-
-// ── 통신 ──────────────────────────────────────────────
-function readProfile() {
-  const ageRaw = userAge ? userAge.value.trim() : '';
-  const age = ageRaw === '' ? null : Number(ageRaw);
-  return {
-    age: Number.isInteger(age) ? age : null,
-    region: (userRegion && userRegion.value.trim()) || '',
-    employment: (userEmployment && userEmployment.value) || '',
-  };
-}
-
-async function requestSummary(text, profile) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-  try {
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: text,
-        age: profile.age,
-        region: profile.region,
-        employment: profile.employment,
-      }),
-      signal: controller.signal,
-    });
-
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      // 서버가 내려준 안내 문구를 그대로 사용 (400 / 500 / 502)
-      throw new Error(data.error || '요청을 처리하지 못했습니다.');
-    }
-    return data.result;
-
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      throw new Error('응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.');
-    }
-    if (err instanceof TypeError) {
-      throw new Error('네트워크 연결을 확인해 주세요.');
-    }
-    throw err;
-
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ── 렌더링 ────────────────────────────────────────────
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
   ));
 }
 
-function showError(message) {
-  result.innerHTML = '';
-  notice.textContent = message;
+function applyFont() {
+  const font = FONTS[state.fontIdx];
+  document.documentElement.style.fontSize = font.px + "px";
+  els.fontBtn.textContent = "가 " + font.label;
+  els.fontBtn.setAttribute("aria-label", "글씨 크기: " + font.label + ". 누르면 다음 크기로 바뀝니다.");
+  try { localStorage.setItem("doenayo-font", font.label); } catch (_) { /* ignore */ }
 }
 
-function render(r) {
-  if (!r || typeof r !== 'object') {
-    throw new Error('결과를 정리하지 못했습니다. 내용을 조금 줄여서 다시 시도해 주세요.');
-  }
-
-  result.innerHTML = '';
-  if (!r.is_policy) {
-    showError('정책 공고문으로 보이지 않습니다. 지원 자격이나 신청 방법이 담긴 부분을 붙여넣어 주세요.');
-    return;
-  }
-  notice.textContent = '';
-
-  const summary = Array.isArray(r.summary) ? r.summary : [];
-  const eligibility = Array.isArray(r.eligibility) ? r.eligibility : [];
-  const documents = Array.isArray(r.documents) ? r.documents : [];
-  const terms = Array.isArray(r.terms) ? r.terms : [];
-  const verdict = r.verdict === 'yes' ? 'yes' : r.verdict === 'no' ? 'no' : 'unknown';
-  const verdictCopy = {
-    yes: { label: '됩니다', reason: r.verdict_reason || '입력한 조건으로 보면 이 공고의 핵심 자격에 들어갑니다.' },
-    no: { label: '안됩니다', reason: r.verdict_reason || '입력한 조건으로는 이 공고의 자격에 들지 않습니다.' },
-    unknown: { label: '지금은 단정하기 어려워요', reason: r.verdict_reason || '나이·거주 외에 소득처럼 확인할 수 없는 조건이 남아 있습니다.' },
-  }[verdict];
-  const matchLabel = { yes: '됩니다', no: '안됩니다', unknown: '확인 필요' };
-
-  const block = (title, inner) =>
-    `<section class="result-block"><h3>${esc(title)}</h3>${inner}</section>`;
-
-  const html = [
-    `<section class="verdict verdict-${verdict}" aria-live="assertive">
-      <p class="verdict-kicker">참고 결론 · 최종 자격 확정 아님</p>
-      <h3>${esc(verdictCopy.label)}</h3>
-      <p>${esc(verdictCopy.reason)}</p>
-    </section>`,
-
-    r.title ? `<p class="result-title">${esc(r.title)}</p>` : '',
-
-    block('한눈에 보기',
-      `<ol class="summary">${summary.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`),
-
-    block('조건별 판정',
-      eligibility.length
-        ? `<ul class="checklist">${eligibility.map((e, i) => {
-            const match = e.match === 'yes' || e.match === 'no' ? e.match : 'unknown';
-            return `
-            <li>
-              <span class="mark-${match}">${esc(matchLabel[match])}</span>
-              <label for="elig-${i}">${esc(e.item)}
-                ${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}
-              </label>
-            </li>`;
-          }).join('')}</ul>`
-        : '<p class="empty">공고문에서 자격 조건을 찾지 못했습니다.</p>'),
-
-    block('준비할 서류',
-      documents.length
-        ? `<ul class="docs">${documents.map(d => `<li>${esc(d)}</li>`).join('')}</ul>`
-        : '<p class="empty">공고문에 명시되지 않음</p>'),
-
-    block('신청 기한', `<p class="deadline">${esc(r.deadline || '공고문에 명시되지 않음')}</p>`),
-
-    terms.length
-      ? block('어려운 말 풀이',
-          `<dl class="terms">${terms.map(t =>
-            `<dt>${esc(t.word)}</dt><dd>${esc(t.meaning)}</dd>`).join('')}</dl>`)
-      : '',
-
-    `<p class="disclaimer">⚠️ AI가 지원 가능 여부를 대신 결정하지 않습니다.
-      됩니다 / 안됩니다는 입력한 조건과 붙여넣은 문장만 본 참고 결론입니다.
-      최종 자격과 서류는 공고 원문과 담당 기관에서 확인하세요.</p>`,
-  ].join('');
-
-  result.innerHTML = html;
-}
-
-// ── 상태 전환 ─────────────────────────────────────────
-function setLoading(on) {
-  btn.disabled = on;
-  btn.textContent = on ? '공고문을 읽는 중...' : '참고 결론 보기';
-  if (on) {
-    notice.textContent = '';
-    result.innerHTML = '<p class="loading-hint" aria-busy="true">공고 조건을 나누고 있습니다. 잠시만 기다려 주세요.</p>';
-  }
-}
-
-// ── 제출 ──────────────────────────────────────────────
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const text = input.value.trim();
-  const profile = readProfile();
-
-  // 클라이언트 1차 검증 — 서버 왕복 없이 즉시 안내 (무료 쿼터 절약)
-  if (profile.age == null) {
-    showError('됩니다·안됩니다를 보려면 만나이를 넣어 주세요.');
-    if (userAge) userAge.focus();
-    return;
-  }
-  if (!profile.region) {
-    showError('거주 시·군을 입력해 주세요.');
-    if (userRegion) userRegion.focus();
-    return;
-  }
-  if (!text) {
-    showError('공고문 내용을 붙여넣어 주세요.');
-    input.focus();
-    return;
-  }
-  if (text.length < MIN_LEN) {
-    showError('내용이 너무 짧습니다. 지원 자격이나 서류 부분을 함께 붙여넣어 주세요.');
-    input.focus();
-    return;
-  }
-  if (text.length > MAX_LEN) {
-    showError(`${MAX_LEN.toLocaleString()}자까지 입력할 수 있습니다.`);
-    input.focus();
-    return;
-  }
-
-  setLoading(true);
-  try {
-    render(await requestSummary(text, profile));
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    setLoading(false);
-  }
-});
-
-// ── 온통청년 목록 ─────────────────────────────────────
-function setYouthStatus(message) {
-  if (youthStatus) youthStatus.textContent = message || '';
-}
-
-function renderYouthList(items) {
-  if (!youthList) return;
-  youthList.innerHTML = '';
-  if (!items.length) {
-    youthList.hidden = true;
-    return;
-  }
-  items.forEach((item) => {
-    const li = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button';
-    const sourceLabel = { policy: '정책', content: '콘텐츠', space: '청년공간' }[item.source] || '정책';
-    button.innerHTML = `
-      <strong>${esc(item.title || '제목 없음')}</strong>
-      <span class="meta">${esc([sourceLabel, item.region, item.inst].filter(Boolean).join(' · '))}</span>
-      ${item.summary ? `<p class="snippet">${esc(item.summary)}</p>` : ''}
-    `;
-    button.addEventListener('click', () => pickYouthPolicy(item.id, item.source || 'policy', button));
-    li.appendChild(button);
-    youthList.appendChild(li);
+function showScreen(name) {
+  state.screen = name;
+  Object.entries(els.views).forEach(([key, node]) => {
+    if (node) node.hidden = key !== name;
   });
-  youthList.hidden = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-async function fetchYouthSource(source, q, profile, timeoutMs = 6000) {
-  const params = new URLSearchParams({ source });
-  if (q) params.set('q', q);
-  if (profile.age != null) params.set('age', String(profile.age));
-  if (profile.region) params.set('region', profile.region);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`/api/policies?${params.toString()}`, { signal: controller.signal });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || source);
+function botMsg(q) {
+  return { role: "bot", text: q.q, hint: q.hint || "" };
+}
+
+function startChat() {
+  state.step = 0;
+  state.answers = {};
+  state.multiPicked = [];
+  state.messages = [botMsg(QUESTIONS[0])];
+  state.detailId = null;
+  state.filter = "all";
+  state.liveItems = [];
+  renderChat();
+  showScreen("chat");
+}
+
+function goHome() { showScreen("home"); }
+function goGuide() { showScreen("guide"); }
+
+function goBackStep() {
+  if (state.step === 0) {
+    goHome();
+    return;
+  }
+  const prev = QUESTIONS[state.step - 1];
+  delete state.answers[prev.id];
+  state.step -= 1;
+  state.multiPicked = [];
+  state.messages = state.messages.slice(0, Math.max(0, state.messages.length - 2));
+  renderChat();
+}
+
+function answer(q, label, value) {
+  state.answers[q.id] = value;
+  state.messages.push({ role: "user", text: label });
+  const next = state.step + 1;
+  if (next >= QUESTIONS.length) {
+    state.step = next;
+    state.multiPicked = [];
+    finishToResult();
+    return;
+  }
+  state.step = next;
+  state.multiPicked = [];
+  state.messages.push(botMsg(QUESTIONS[next]));
+  renderChat();
+}
+
+function toggleMulti(v) {
+  if (state.multiPicked.includes(v)) {
+    state.multiPicked = state.multiPicked.filter((x) => x !== v);
+  } else {
+    state.multiPicked = state.multiPicked.concat(v);
+  }
+}
+
+function confirmMulti() {
+  const q = QUESTIONS[state.step];
+  const labels = q.options
+    .filter((o) => state.multiPicked.includes(o.v))
+    .map((o) => o.l);
+  answer(q, labels.length ? labels.join(", ") : "특별히 없음", state.multiPicked.slice());
+}
+
+function ageOk(p, age) {
+  return !p.age || (age >= p.age[0] && age <= p.age[1]);
+}
+
+function evaluate(p, answers) {
+  const a = answers;
+  const checks = [];
+  let worst = "yes";
+  const push = (m, text) => {
+    checks.push({ match: m, text });
+    if (m === "no") worst = "no";
+    else if (m === "unknown" && worst !== "no") worst = "unknown";
+  };
+
+  if (p.age) {
+    const ok = ageOk(p, a.age);
+    push(ok ? "yes" : "no", `연령 ${p.age[0]}세~${p.age[1] >= 99 ? "제한 없음" : p.age[1] + "세"} · 고른 답 ${a.age}세 전후`);
+  }
+  if (p.regions) {
+    const ok = p.regions.includes(a.region);
+    push(ok ? "yes" : "no", `${p.regions.join("·")} 거주 · 고른 답 ${a.region}`);
+  } else {
+    push("yes", "전국 사업 · 거주지 제한 없음");
+  }
+  if (p.incomeMax) {
+    const label = p.incomeMax >= 999 ? "소득 제한 없음" : `기준 중위소득 ${p.incomeMax}% 이하`;
+    if (a.income == null) push("unknown", `${label} · 소득을 모르겠다고 답하셨습니다`);
+    else push(a.income <= p.incomeMax ? "yes" : "no", `${label} · 고른 답 ${a.income >= 999 ? "150% 넘음" : a.income + "% 이하"}`);
+  }
+  if (p.status) {
+    const ok = p.status.includes(a.status);
+    push(ok ? "yes" : "no", `${p.status.map((s) => STATUS_LABEL[s]).join(", ")} 대상 · 고른 답 ${STATUS_LABEL[a.status]}`);
+  }
+  if (p.marital) {
+    const ok = p.marital.includes(a.marital) || (p.marital.includes("child") && a.household === "kids");
+    push(ok ? "yes" : "no", `${p.marital.map((s) => MARITAL_LABEL[s]).join(", ")} 가구 대상 · 고른 답 ${MARITAL_LABEL[a.marital]}`);
+  }
+  if (p.disability) {
+    const ok = p.disability.includes(a.disability);
+    push(ok ? "yes" : "no", `장애 등록 본인 · 고른 답 ${DISABILITY_LABEL[a.disability]}`);
+  }
+  push("unknown", "예산 소진·서류 심사 등 남은 조건은 기관에서 확인해야 합니다.");
+
+  const reason = worst === "yes"
+    ? "고른 답으로 보면 공개된 핵심 자격에 모두 들어갑니다."
+    : worst === "unknown"
+      ? "핵심 자격은 걸리지 않지만 확인하지 못한 조건이 남아 있습니다."
+      : "고른 답과 맞지 않는 조건이 있습니다. 아래 항목을 확인해 보세요.";
+  return { verdict: worst, checks, reason };
+}
+
+function matched() {
+  const a = state.answers;
+  const interests = Array.isArray(a.interest) ? a.interest : [];
+  const rows = POLICIES.map((p) => ({ p, ev: evaluate(p, a) }))
+    .filter(({ ev }) => ev.verdict !== "no")
+    .map((row) => ({ ...row, hit: row.p.cat.some((c) => interests.includes(c)) }));
+  const wanted = rows.filter((r) => r.hit);
+  const list = wanted.length ? wanted : rows;
+  const order = { yes: 0, unknown: 1 };
+  const catalog = list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict]);
+  return catalog.concat(state.liveItems);
+}
+
+function renderSegments() {
+  els.segmentGrid.innerHTML = SEGMENTS.map((seg) => `
+    <div class="segment-card">
+      <strong>${esc(seg.name)}</strong>
+      <span>${esc(seg.desc)}</span>
+    </div>
+  `).join("");
+}
+
+function renderChat() {
+  const q = QUESTIONS[Math.min(state.step, QUESTIONS.length - 1)];
+  const pct = Math.round((Math.min(state.step, QUESTIONS.length) / QUESTIONS.length) * 100);
+  els.progressBar.style.width = pct + "%";
+  els.progressLabel.textContent = `${Math.min(state.step + 1, QUESTIONS.length)} / ${QUESTIONS.length}`;
+
+  els.chatLog.innerHTML = state.messages.map((m) => {
+    if (m.role === "user") {
+      return `<div class="bubble bubble-user"><p>${esc(m.text)}</p></div>`;
     }
-    return {
-      source,
-      items: Array.isArray(data.items) ? data.items : [],
-      kept: (data.stats && data.stats[source] && data.stats[source].kept) || (data.items || []).length,
-      error: '',
-    };
-  } catch (err) {
-    const message = err.name === 'AbortError' ? '시간 초과' : (err.message || '실패');
-    return { source, items: [], kept: 0, error: message };
+    return `<div class="bubble bubble-bot">
+      <p><strong>${esc(m.text)}</strong></p>
+      ${m.hint ? `<p class="bubble-hint">${esc(m.hint)}</p>` : ""}
+    </div>`;
+  }).join("");
+  els.chatLog.scrollTop = els.chatLog.scrollHeight;
+  renderChoices(true);
+}
+
+function renderChoices(focusFirst) {
+  const q = QUESTIONS[Math.min(state.step, QUESTIONS.length - 1)];
+  els.choiceList.innerHTML = "";
+  q.options.forEach((opt) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "choice";
+    btn.textContent = opt.l;
+    if (q.multi && state.multiPicked.includes(opt.v)) btn.classList.add("is-on");
+    btn.addEventListener("click", () => {
+      if (q.multi) {
+        toggleMulti(opt.v);
+        renderChoices(false);
+      } else {
+        answer(q, opt.l, opt.v);
+      }
+    });
+    els.choiceList.appendChild(btn);
+  });
+  if (q.multi) {
+    els.multiBtn.hidden = false;
+    els.multiBtn.textContent = state.multiPicked.length
+      ? `${state.multiPicked.length}개 고름 · 결과 보기`
+      : "고르지 않고 결과 보기";
+  } else {
+    els.multiBtn.hidden = true;
+  }
+  if (focusFirst) {
+    const first = els.choiceList.querySelector(".choice");
+    if (first) first.focus();
+  }
+}
+
+function ageLabel() {
+  const found = QUESTIONS[0].options.find((o) => o.v === state.answers.age);
+  return found ? found.l : "";
+}
+
+function renderResults() {
+  const rows = matched();
+  const visible = state.filter === "all" ? rows : rows.filter((r) => r.ev.verdict === state.filter);
+  const yesCount = rows.filter((r) => r.ev.verdict === "yes").length;
+  const unknownCount = rows.filter((r) => r.ev.verdict === "unknown").length;
+  const interests = Array.isArray(state.answers.interest) ? state.answers.interest : [];
+
+  els.profileLine.textContent = [ageLabel(), state.answers.region, interests.join("·")].filter(Boolean).join(" · ");
+  els.resultHeadline.textContent = rows.length ? `받을 수 있어 보이는 정책 ${rows.length}건` : "결과";
+
+  els.resultFilter.innerHTML = [
+    { id: "all", label: `전체 ${rows.length}` },
+    { id: "yes", label: `됩니다 ${yesCount}` },
+    { id: "unknown", label: `확인 필요 ${unknownCount}` },
+  ].map((tab) => `
+    <button type="button" data-filter="${tab.id}" ${state.filter === tab.id ? 'aria-selected="true" class="is-on"' : ""}>${esc(tab.label)}</button>
+  `).join("");
+
+  els.resultList.innerHTML = "";
+  visible.forEach(({ p, ev }) => {
+    const chip = CHIP[ev.verdict];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "policy-card";
+    btn.innerHTML = `
+      <span class="policy-top">
+        <span class="stamp" style="background:${chip.bg};color:${chip.color}">${esc(chip.label)}</span>
+        <span class="meta-tiny">${esc([p.org, p.cat.join("·")].filter(Boolean).join(" · "))}</span>
+      </span>
+      <strong>${esc(p.title)}</strong>
+      <em>${esc(p.summary)}</em>
+    `;
+    btn.addEventListener("click", () => openDetail(p.id));
+    els.resultList.appendChild(btn);
+  });
+
+  els.resultEmpty.hidden = visible.length > 0;
+  showScreen("result");
+}
+
+function openDetail(id) {
+  const row = matched().find((r) => r.p.id === id);
+  if (!row) return;
+  state.detailId = id;
+  const { p, ev } = row;
+  const tone = ev.verdict === "yes" ? "yes" : ev.verdict === "unknown" ? "unknown" : "no";
+  const title = ev.verdict === "yes" ? "됩니다" : ev.verdict === "unknown" ? "확인이 필요합니다" : "어렵습니다";
+  els.detailBanner.className = "verdict-banner verdict-" + tone;
+  els.detailBanner.innerHTML = `
+    <p class="kicker">참고 결론 · 최종 자격 확정 아님</p>
+    <h2>${title}</h2>
+    <p>${esc(ev.reason)}</p>
+  `;
+  els.detailMeta.textContent = [p.org, p.cat.join("·")].filter(Boolean).join(" · ");
+  els.detailTitle.textContent = p.title;
+  els.detailSummary.textContent = p.summary;
+  els.detailChecks.innerHTML = ev.checks.map((c) => {
+    const chip = CHIP[c.match];
+    return `<li><span class="stamp" style="background:${chip.bg};color:${chip.color}">${esc(chip.label)}</span><span>${esc(c.text)}</span></li>`;
+  }).join("");
+  els.detailDocs.innerHTML = (p.docs || []).map((d) => `<li>${esc(d)}</li>`).join("")
+    || "<li>공고 원문에서 확인해 주세요.</li>";
+  els.detailDeadline.textContent = p.deadline || "공고 원문에서 확인해 주세요.";
+  if (p.link) {
+    els.detailLink.innerHTML = `<a href="${esc(p.link)}" target="_blank" rel="noopener noreferrer">${esc(p.linkLabel || p.link)}</a>`;
+  } else {
+    els.detailLink.textContent = "담당 기관 공고를 확인해 주세요.";
+  }
+  showScreen("detail");
+}
+
+async function maybeFetchYouth() {
+  const age = state.answers.age;
+  const region = state.answers.region;
+  if (age == null || age < 19 || age > 39) return;
+  els.liveStatus.textContent = "온통청년에서 같은 나이·지역 정책을 더 찾고 있습니다.";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const params = new URLSearchParams({ source: "policy", age: String(age) });
+    if (region) params.set("region", region);
+    const res = await fetch(`/api/policies?${params}`, { signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    const items = Array.isArray(data.items) ? data.items : [];
+    const known = new Set(POLICIES.map((p) => p.title));
+    state.liveItems = items.slice(0, 6).filter((it) => it.title && !known.has(it.title)).map((it) => ({
+      p: {
+        id: "live-" + it.id,
+        title: it.title,
+        org: it.inst || "온통청년",
+        cat: ["일자리"],
+        summary: it.summary || "온통청년 목록에서 가져온 정책입니다. 원문에서 자격과 서류를 확인하세요.",
+        docs: ["공고 원문에서 확인"],
+        deadline: "공고 원문에서 확인",
+        link: "https://www.youthcenter.go.kr/",
+        linkLabel: "온통청년",
+        live: true,
+      },
+      ev: {
+        verdict: "unknown",
+        reason: "온통청년 목록에서 더 가져온 항목입니다. 공개 요약만 있어 확인이 필요합니다.",
+        checks: [
+          { match: "yes", text: `나이 ${age}세 전후 · 온통청년 청년 정책 목록` },
+          { match: region ? "yes" : "unknown", text: region ? `거주 ${region}` : "거주 미확인" },
+          { match: "unknown", text: "서류·소득·세부 자격은 공고 원문에서 확인해야 합니다." },
+        ],
+      },
+      hit: true,
+    }));
+    if (state.screen === "result") renderResults();
+    els.liveStatus.textContent = state.liveItems.length
+      ? `온통청년에서 ${state.liveItems.length}건을 더 붙였습니다.`
+      : "온통청년에서 더 붙일 항목이 없습니다.";
+  } catch (_) {
+    els.liveStatus.textContent = "온통청년 추가 목록은 생략했습니다. 위 결과만 보시면 됩니다.";
   } finally {
     clearTimeout(timer);
   }
 }
 
-function applyYouthResults(results, profile) {
-  const items = results.flatMap((row) => row.items);
-  renderYouthList(items);
-  const labels = { policy: '정책', content: '콘텐츠', space: '청년공간' };
-  const bits = results.map((row) => {
-    if (row.error) return `${labels[row.source]} 생략(${row.error})`;
-    return `${labels[row.source]} ${row.kept}`;
-  });
-  const cond = [profile.age != null ? `나이 ${profile.age}` : '', profile.region ? `거주 ${profile.region}` : '']
-    .filter(Boolean).join(' · ');
-  if (!items.length && results.every((row) => row.error)) {
-    setYouthStatus('온통청년에 연결하지 못했습니다. 잠시 후 다시 시도하거나 공고문을 붙여넣어 주세요.');
-  } else if (!items.length) {
-    setYouthStatus('조건에 맞는 항목이 없습니다. 나이·거주를 확인하거나 검색어를 바꿔 보세요.');
-  } else {
-    setYouthStatus(`${cond ? cond + ' 기준 · ' : ''}${bits.join(' · ')}. 고르면 아래 입력창에 채워집니다.`);
-  }
+function finishToResult() {
+  renderResults();
+  maybeFetchYouth();
 }
 
-async function loadYouthPolicies() {
-  if (!youthLoadBtn || youthLoadBtn.disabled) return;
-  const q = (youthQuery && youthQuery.value.trim()) || '';
-  youthLoadBtn.disabled = true;
-  const profile = readProfile();
-  const bySource = {};
-  let settled = false;
+function bind() {
+  els.logoBtn.addEventListener("click", goHome);
+  els.guideBtn.addEventListener("click", goGuide);
+  els.startBtn.addEventListener("click", startChat);
+  els.guideStartBtn.addEventListener("click", startChat);
+  els.backBtn.addEventListener("click", goBackStep);
+  els.multiBtn.addEventListener("click", confirmMulti);
+  els.restartBtn.addEventListener("click", startChat);
+  els.resultGuideBtn.addEventListener("click", goGuide);
+  els.backResultBtn.addEventListener("click", () => { renderResults(); });
+  els.fontBtn.addEventListener("click", () => {
+    state.fontIdx = (state.fontIdx + 1) % FONTS.length;
+    applyFont();
+  });
+  els.resultFilter.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-filter]");
+    if (!btn) return;
+    state.filter = btn.getAttribute("data-filter");
+    renderResults();
+  });
+}
 
-  const finish = () => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(watchdog);
-    const results = ['policy', 'space'].map((source) => (
-      bySource[source] || { source, items: [], kept: 0, error: '시간 초과' }
-    ));
-    applyYouthResults(results, profile);
-    youthLoadBtn.disabled = false;
+function restoreFont() {
+  try {
+    const saved = localStorage.getItem("doenayo-font");
+    const idx = FONTS.findIndex((f) => f.label === saved);
+    if (idx >= 0) state.fontIdx = idx;
+  } catch (_) { /* ignore */ }
+  applyFont();
+}
+
+function demoIfNeeded() {
+  if (new URLSearchParams(location.search).get("demo") !== "1") return;
+  state.answers = {
+    age: 25,
+    region: "대전",
+    household: "single",
+    income: 150,
+    status: "student",
+    marital: "unmarried",
+    disability: "none",
+    interest: ["주거", "교육", "일자리"],
   };
-
-  const watchdog = setTimeout(finish, 8000);
-  setYouthStatus('온통청년 정책을 찾는 중입니다. 청년공간은 되면 덧붙입니다.');
-
-  try {
-    bySource.policy = await fetchYouthSource('policy', q, profile, 6000);
-    if (!settled) {
-      renderYouthList(bySource.policy.items);
-      if (bySource.policy.items.length) {
-        setYouthStatus('정책 목록입니다. 청년공간은 이어서 붙입니다.');
-      }
-    }
-
-    bySource.space = await fetchYouthSource('space', q, profile, 4000);
-  } catch (err) {
-    if (!bySource.policy) {
-      bySource.policy = { source: 'policy', items: [], kept: 0, error: err.message || '실패' };
-    }
-  } finally {
-    finish();
-  }
+  finishToResult();
 }
 
-async function pickYouthPolicy(id, source, button) {
-  if (!id) return;
-  if (button) button.disabled = true;
-  setYouthStatus('선택한 항목의 상세를 불러오는 중입니다.');
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    let res;
-    try {
-      res = await fetch(`/api/policies?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source || 'policy')}`, {
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || '정책 상세를 가져오지 못했습니다.');
-    }
-    const text = (data.item && data.item.text) || '';
-    if (!text) {
-      throw new Error('정책 본문이 비어 있습니다. 다른 항목을 고르거나 직접 붙여넣어 주세요.');
-    }
-    input.value = text.slice(0, MAX_LEN);
-    input.dispatchEvent(new Event('input'));
-    input.focus();
-    setYouthStatus(`「${data.item.title || '선택한 정책'}」을 입력창에 넣었습니다. 결과 확인하기를 눌러 주세요.`);
-  } catch (err) {
-    setYouthStatus(err.message);
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-if (youthLoadBtn) {
-  youthLoadBtn.addEventListener('click', loadYouthPolicies);
-}
-if (youthQuery) {
-  youthQuery.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      loadYouthPolicies();
-    }
-  });
-}
-
-// ── 샘플 넣어보기 ─────────────────────────────────────
-sampleBtn.addEventListener('click', () => {
-  input.value = SAMPLE_TEXT;
-  input.dispatchEvent(new Event('input'));
-  input.focus();
-});
-
-// ── 홈 CTA → 입력창 포커스 ────────────────────────────
-document.querySelectorAll('[data-goto-check]').forEach(el => {
-  el.addEventListener('click', () => setTimeout(() => (userAge || input).focus(), 400));
-});
-
-// ── 모바일 햄버거 메뉴 ────────────────────────────────
-function setMenuOpen(open) {
-  if (!hamburger || !navLinks) return;
-  hamburger.setAttribute('aria-expanded', String(open));
-  hamburger.setAttribute('aria-label', open ? '메뉴 닫기' : '메뉴 열기');
-  navLinks.classList.toggle('is-open', open);
-  document.body.classList.toggle('menu-open', open);
-}
-
-if (hamburger && navLinks) {
-  hamburger.addEventListener('click', () => {
-    const open = hamburger.getAttribute('aria-expanded') !== 'true';
-    setMenuOpen(open);
-  });
-
-  navLinks.querySelectorAll('a').forEach(link => {
-    link.addEventListener('click', () => setMenuOpen(false));
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') setMenuOpen(false);
-  });
-}
-
-// ── 다크 모드 ─────────────────────────────────────────
-function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  if (themeBtn) {
-    themeBtn.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
-    themeBtn.textContent = theme === 'dark' ? '낮' : '밤';
-    themeBtn.setAttribute('aria-label', theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기');
-  }
-}
-
-const savedTheme = localStorage.getItem('doenayo-theme');
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-applyTheme(savedTheme || (prefersDark ? 'dark' : 'light'));
-
-if (themeBtn) {
-  themeBtn.addEventListener('click', () => {
-    const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('doenayo-theme', next);
-    applyTheme(next);
-  });
-}
-
-detectLocation();
-
-// README·증빙용 미리보기: ?demo=1
-if (new URLSearchParams(location.search).get('demo') === '1') {
-  if (userAge) userAge.value = '24';
-  if (userRegion) userRegion.value = '대전광역시';
-  input.value = SAMPLE_TEXT;
-  input.dispatchEvent(new Event('input'));
-  render({
-    is_policy: true,
-    verdict: 'yes',
-    verdict_reason: '만 24세·대전광역시 생활권이라 나이와 지역 조건에 들어갑니다. 콘텐츠 제작 역량은 직접 확인하세요.',
-    title: '2026년 대전 청년 서포터즈 모집',
-    summary: [
-      '대전광역시 생활권 청년 30명이 청년정책 홍보 콘텐츠를 만드는 서포터즈입니다.',
-      '활동 목표를 달성하면 소정의 활동비와 수료증을 받습니다.',
-      '3월 23일부터 4월 8일 오후 5시까지 신청합니다.',
-    ],
-    eligibility: [
-      { item: '대전광역시를 주 생활권으로 하는 청년', note: '만 18세 이상 39세 이하', match: 'yes' },
-      { item: '만 18세 이상 39세 이하', note: '신청일 기준', match: 'yes' },
-      { item: '청년정책 홍보 콘텐츠를 기획·제작할 수 있을 것', note: '주관 조건', match: 'unknown' },
-    ],
-    documents: ['지원서(이메일 제출)'],
-    deadline: '2026. 3. 23.(월) 00:00 ~ 4. 8.(수) 17:00',
-    terms: [{ word: '주 생활권', meaning: '주민등록지뿐 아니라 학교·직장 등으로 대전광역시에서 주로 지내는 경우를 말합니다.' }],
-  });
-  location.hash = '#check';
-}
+restoreFont();
+renderSegments();
+bind();
+showScreen("home");
+demoIfNeeded();
