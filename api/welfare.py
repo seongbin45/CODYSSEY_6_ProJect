@@ -314,13 +314,34 @@ def text_age_ok(blob, age):
     return True, "문장에 연령 없음"
 
 
+def catalog_link(item, source, uid):
+    """목록 필드를 쓰고, 상세 API처럼 필드가 없으면 ID로 같은 원문 주소를 만든다."""
+    if source == "benefit":
+        given = str(item.get("상세조회URL") or "").strip()
+        if given.startswith("http"):
+            return given
+        if uid:
+            return "https://www.gov.kr/portal/rcvfvrSvc/dtlEx/" + uid
+        return "https://www.gov.kr/"
+    given = str(item.get("servDtlLink") or "").replace("&amp;", "&").strip()
+    if given.startswith("http"):
+        return given
+    if uid:
+        kind = "02" if source == "local" else "01"
+        return (
+            "https://www.bokjiro.go.kr/ssis-tbu/twataa/wlfareInfo/moveTWAT52011M.do"
+            "?wlfareInfoId=%s&wlfareInfoReldBztpCd=%s" % (uid, kind)
+        )
+    return "https://www.bokjiro.go.kr/"
+
+
 def card_from_welfare(item, source):
     if source == "benefit":
         uid = str(item.get("서비스ID") or "")
         title = str(item.get("서비스명") or "제목 없음")
         summary = item.get("서비스목적요약") or item.get("지원대상") or item.get("지원내용") or ""
         org = str(item.get("소관기관명") or "정부24")
-        link = str(item.get("상세조회URL") or "https://www.gov.kr/")
+        link = catalog_link(item, "benefit", uid)
         deadline = fmt_ymd(item.get("신청기한") or "")
         field = str(item.get("서비스분야") or "")
         return {
@@ -346,12 +367,12 @@ def card_from_welfare(item, source):
     summary = item.get("servDgst") or ""
     if source == "local":
         org = " ".join(x for x in (item.get("ctpvNm"), item.get("sggNm"), item.get("bizChrDeptNm")) if x)
-        link = str(item.get("servDtlLink") or "https://www.bokjiro.go.kr/")
+        link = catalog_link(item, "local", uid)
         region = str(item.get("ctpvNm") or "")
         label = "지자체 복지"
     else:
         org = str(item.get("jurMnofNm") or item.get("jurOrgNm") or "중앙부처")
-        link = str(item.get("servDtlLink") or "https://www.bokjiro.go.kr/")
+        link = catalog_link(item, "welfare", uid)
         region = "전국"
         label = "중앙부처 복지"
     thema = str(item.get("intrsThemaArray") or item.get("intrsThemaNmArray") or "")
@@ -524,14 +545,18 @@ def detail_welfare(item_id, source, trace):
         card["docs"] = docs[:8]
         card["deadline"] = fmt_ymd(item.get("신청기한") or card["deadline"])
         card["summary"] = _clip(item.get("지원대상") or item.get("서비스목적") or card["summary"], 400)
-        card["text"] = "\n".join([
+        apply = str(item.get("온라인신청사이트URL") or "").strip()
+        lines = [
             "[출처] 정부24 공공서비스",
             "지원대상: %s" % (item.get("지원대상") or ""),
             "선정기준: %s" % (item.get("선정기준") or ""),
             "지원내용: %s" % (item.get("지원내용") or ""),
             "신청방법: %s" % (item.get("신청방법") or ""),
             "구비서류: %s" % (item.get("구비서류") or ""),
-        ])
+        ]
+        if apply.startswith("http"):
+            lines.append("신청 주소: %s" % apply)
+        card["text"] = "\n".join(lines)
         return card
 
     url = NAT_DETAIL if source == "welfare" else LOCAL_DETAIL

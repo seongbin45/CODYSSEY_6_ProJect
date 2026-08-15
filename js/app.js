@@ -396,7 +396,16 @@ async function fillLiveDetail(row, endpoint) {
     if (dead) els.detailDeadline.textContent = dead.replace("신청 기간:", "").trim();
     const apply = text.split("\n").find((line) => line.indexOf("신청 주소:") === 0);
     const href = apply ? apply.replace("신청 주소:", "").trim() : (data.item.link || "");
-    if (href.indexOf("http") === 0) {
+    const homes = [
+      "https://www.gov.kr",
+      "https://www.gov.kr/",
+      "https://www.bokjiro.go.kr",
+      "https://www.bokjiro.go.kr/",
+      "https://www.youthcenter.go.kr",
+      "https://www.youthcenter.go.kr/",
+    ];
+    const keepList = homes.indexOf(href) >= 0 && row.p.link && homes.indexOf(row.p.link) < 0;
+    if (href.indexOf("http") === 0 && !keepList) {
       els.detailLink.innerHTML = `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(data.item.linkLabel || "신청·안내 페이지")}</a>`;
     }
   } catch (_) {
