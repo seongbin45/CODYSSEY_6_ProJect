@@ -450,9 +450,10 @@ async function fetchLivePolicies() {
       .slice(0, 6)
       .map((it) => mapLiveItem(it, "policy"));
     if (els.liveStatus) {
+      const place = a.region || "전국";
       els.liveStatus.textContent = state.liveRows.length
-        ? `온통청년에서 ${state.liveRows.length}건을 더 붙였습니다. 정부24·복지로·고용24는 이 서비스가 목록을 받아오지 않습니다.`
-        : "온통청년에 연결했지만, 지금 조건으로 더 붙일 항목은 없습니다. 정부24·복지로·고용24는 연결되지 않았습니다.";
+        ? `온통청년 최신 전국 목록에서 ${place}·전국 ${state.liveRows.length}건을 붙였습니다. 온통청년은 지역을 서버에서 거르지 않아, 최신 공고 중 나이·시·도가 맞는 것만 보여 줍니다. 정부24·복지로·고용24는 목록을 받아오지 않습니다.`
+        : `온통청년에 연결했습니다. 최신 목록에 ${place}나 전국으로 맞는 청년 정책이 없었습니다. 정부24·복지로·고용24는 연결되지 않았습니다.`;
     }
     if (state.screen === "result") renderResults();
   } catch (_) {
