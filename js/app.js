@@ -6,8 +6,6 @@ const state = {
   messages: [],
   detailId: null,
   fontIdx: 0,
-  answering: false,
-  pendingTimer: 0,
 };
 
 const els = {
@@ -69,20 +67,10 @@ function cycleFont() {
   applyFont();
 }
 
-function clearPending() {
-  if (state.pendingTimer) {
-    window.clearTimeout(state.pendingTimer);
-    state.pendingTimer = 0;
-  }
-  state.answering = false;
-}
-
 function scrollChat() {
   const el = els.chatLog;
   if (!el) return;
-  requestAnimationFrame(() => {
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  });
+  el.scrollTop = el.scrollHeight;
 }
 
 function showScreen(name) {
@@ -98,28 +86,22 @@ function botMsg(q) {
 }
 
 function startChat() {
-  clearPending();
   state.step = 0;
   state.answers = {};
   state.multiPicked = [];
   state.messages = [botMsg(QUESTIONS[0])];
   state.detailId = null;
   resetChatLog();
+  appendBubble(state.messages[0]);
   renderProgress();
-  els.choiceList.innerHTML = "";
-  els.multiBtn.hidden = true;
+  renderChoices();
   showScreen("chat");
-  requestAnimationFrame(() => {
-    appendBubble(state.messages[0]);
-    renderChoices();
-  });
 }
 
-function goHome() { clearPending(); showScreen("home"); }
-function goGuide() { clearPending(); showScreen("guide"); }
+function goHome() { showScreen("home"); }
+function goGuide() { showScreen("guide"); }
 
 function goBackStep() {
-  clearPending();
   if (state.step === 0) {
     goHome();
     return;
@@ -135,36 +117,24 @@ function goBackStep() {
 }
 
 function answer(q, label, value) {
-  if (state.answering) return;
-  state.answering = true;
   state.answers[q.id] = value;
   const userMsg = { role: "user", text: label };
   state.messages.push(userMsg);
   appendBubble(userMsg);
-  els.choiceList.classList.add("is-out");
-  els.multiBtn.hidden = true;
   const next = state.step + 1;
   if (next >= QUESTIONS.length) {
     state.step = next;
     state.multiPicked = [];
-    state.pendingTimer = window.setTimeout(() => {
-      state.pendingTimer = 0;
-      state.answering = false;
-      finishToResult();
-    }, 280);
+    finishToResult();
     return;
   }
   state.step = next;
   state.multiPicked = [];
-  renderProgress();
   const nextBot = botMsg(QUESTIONS[next]);
   state.messages.push(nextBot);
-  state.pendingTimer = window.setTimeout(() => {
-    state.pendingTimer = 0;
-    appendBubble(nextBot);
-    renderChoices();
-    state.answering = false;
-  }, 280);
+  appendBubble(nextBot);
+  renderProgress();
+  renderChoices();
 }
 
 function toggleMulti(v) {
@@ -285,13 +255,11 @@ function renderProgress() {
 
 function renderChoices() {
   const q = QUESTIONS[Math.min(state.step, QUESTIONS.length - 1)];
-  els.choiceList.classList.remove("is-out");
   els.choiceList.innerHTML = "";
-  q.options.forEach((opt, i) => {
+  q.options.forEach((opt) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "choice is-new";
-    btn.style.animationDelay = (i * 0.03) + "s";
+    btn.className = "choice";
     btn.textContent = opt.l;
     if (q.multi && state.multiPicked.includes(opt.v)) btn.classList.add("is-on");
     btn.addEventListener("click", () => {

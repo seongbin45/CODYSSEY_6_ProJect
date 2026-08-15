@@ -342,7 +342,7 @@ h1 {
 }
 
 .bubble.is-new {
-  animation: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rise 0.25s ease both;
 }
 
 .bubble p { margin: 0; }
@@ -393,12 +393,6 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  transition: opacity 0.18s ease;
-}
-
-.choice-list.is-out {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .choice {
@@ -410,10 +404,6 @@ h1 {
   font-size: 0.97rem;
   font-weight: 600;
   min-height: 2.9rem;
-}
-
-.choice.is-new {
-  animation: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .choice:hover,
@@ -725,8 +715,6 @@ h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bubble.is-new,
-  .choice.is-new { animation: none; }
-  .choice-list { transition: none; }
+  .bubble.is-new { animation: none; }
   .progress-bar { transition: none; }
 }
