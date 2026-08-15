@@ -220,12 +220,12 @@ git log -p | grep -iE "AIza|api[_-]?key\s*=\s*['\"][A-Za-z0-9_-]{20,}"
 {
   "result": {
     "is_policy": true,
-    "title": "2026 군산 청년 서포터즈 2기 참여자 모집",
+    "title": "2026년 대전 청년 서포터즈 모집",
     "summary": ["...", "...", "..."],
-    "eligibility": [{ "item": "군산시에 주소를 둔 청년", "note": "18세 이상 39세 이하" }],
-    "documents": ["참여신청서", "주민등록초본", "개인정보동의서"],
-    "deadline": "2026. 6. 3.(수) ~ 6. 25.(목)",
-    "terms": [{ "word": "기타소득", "meaning": "..." }]
+    "eligibility": [{ "item": "대전광역시를 주 생활권으로 하는 청년", "note": "만 18세 이상 39세 이하" }],
+    "documents": ["지원서(이메일 제출)"],
+    "deadline": "2026. 3. 23.(월) 00:00 ~ 4. 8.(수) 17:00",
+    "terms": [{ "word": "주 생활권", "meaning": "..." }]
   }
 }
 ```
@@ -311,9 +311,10 @@ git log -p | grep -iE "AIza|api[_-]?key\s*=\s*['\"][A-Za-z0-9_-]{20,}"
 - [Vercel — Python Functions in the /api Directory](https://vercel.com/docs/functions/runtimes/python/api-directory)
 - [Vercel — Functions Limits](https://vercel.com/docs/functions/limitations)
 - [Gemini API — Text Generation](https://ai.google.dev/gemini-api/docs/text-generation)
+- [대전청년포털](https://www.daejeonyouthportal.kr/)
 - [군산시 청년정책 포털](https://gsyouth.or.kr/main/m116/)
 
-> 샘플 공고문은 군산시 청년정책 포털에 게시된 「2026 군산 청년 서포터즈 2기 참여자 모집」 공고를 발췌한 것입니다.
+> 샘플 공고문은 대전청년내일재단 「2026년 대전 청년 서포터즈 모집」 공개 공고를 발췌한 것입니다.
 
 ---
 
