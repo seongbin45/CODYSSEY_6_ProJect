@@ -32,10 +32,10 @@ POLICY_URL = BASE_URL + "/go/ythip/getPlcy"
 CONTENT_URL = BASE_URL + "/go/ythip/getContent"
 SPACE_URL = BASE_URL + "/go/ythip/getSpace"
 
-TIMEOUT = 8.0
-MAX_RETRIES = 3
-BACKOFF = 0.7
-PAGE_SIZE = 100
+TIMEOUT = 5.0
+MAX_RETRIES = 1
+BACKOFF = 0.4
+PAGE_SIZE = 20
 MAX_TEXT_LEN = 2000
 
 GUNSAN_HINTS = ("군산", "Gunsan", "GUNSAN")

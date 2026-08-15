@@ -388,35 +388,61 @@ function renderYouthList(items) {
   youthList.hidden = false;
 }
 
+async function fetchYouthSource(source, q, profile) {
+  const params = new URLSearchParams({ source });
+  if (q) params.set('q', q);
+  if (profile.age != null) params.set('age', String(profile.age));
+  if (profile.region) params.set('region', profile.region);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(`/api/policies?${params.toString()}`, { signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || source);
+    }
+    return {
+      source,
+      items: Array.isArray(data.items) ? data.items : [],
+      kept: (data.stats && data.stats[source] && data.stats[source].kept) || (data.items || []).length,
+      error: '',
+    };
+  } catch (err) {
+    const message = err.name === 'AbortError' ? '시간 초과' : (err.message || '실패');
+    return { source, items: [], kept: 0, error: message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function loadYouthPolicies() {
   if (!youthLoadBtn) return;
   const q = (youthQuery && youthQuery.value.trim()) || '';
   youthLoadBtn.disabled = true;
   const profile = readProfile();
-  setYouthStatus('온통청년 정책·콘텐츠·청년공간을 조건에 맞춰 찾는 중입니다.');
+  setYouthStatus('온통청년에서 정책·콘텐츠·청년공간을 각각 찾는 중입니다…');
   try {
-    const params = new URLSearchParams({ source: 'all' });
-    if (q) params.set('q', q);
-    if (profile.age != null) params.set('age', String(profile.age));
-    if (profile.region) params.set('region', profile.region);
-    const res = await fetch(`/api/policies?${params.toString()}`);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || '온통청년 목록을 가져오지 못했습니다.');
-    }
-    const items = Array.isArray(data.items) ? data.items : [];
+    const results = await Promise.all([
+      fetchYouthSource('policy', q, profile),
+      fetchYouthSource('content', q, profile),
+      fetchYouthSource('space', q, profile),
+    ]);
+    const items = results.flatMap((row) => row.items);
     renderYouthList(items);
-    const stats = data.stats || {};
-    const bits = ['정책', '콘텐츠', '청년공간'].map((label, i) => {
-      const key = ['policy', 'content', 'space'][i];
-      const row = stats[key] || {};
-      return `${label} ${row.kept ?? 0}`;
+    const labels = { policy: '정책', content: '콘텐츠', space: '청년공간' };
+    const bits = results.map((row) => {
+      if (row.error) return `${labels[row.source]} 실패(${row.error})`;
+      return `${labels[row.source]} ${row.kept}`;
     });
     const cond = [profile.age != null ? `나이 ${profile.age}` : '', profile.region ? `거주 ${profile.region}` : '']
       .filter(Boolean).join(' · ');
-    setYouthStatus(items.length
-      ? `${cond ? cond + ' 기준 · ' : ''}${bits.join(' · ')}건. 고르면 아래 입력창에 채워집니다.`
-      : '조건에 맞는 항목이 없습니다. 나이·거주를 확인하거나 검색어를 바꿔 보세요.');
+    if (!items.length && results.every((row) => row.error)) {
+      setYouthStatus('온통청년에 연결하지 못했습니다. 잠시 후 다시 시도하거나 공고문을 붙여넣어 주세요.');
+    } else if (!items.length) {
+      setYouthStatus('조건에 맞는 항목이 없습니다. 나이·거주를 확인하거나 검색어를 바꿔 보세요.');
+    } else {
+      setYouthStatus(`${cond ? cond + ' 기준 · ' : ''}${bits.join(' · ')}. 고르면 아래 입력창에 채워집니다.`);
+    }
   } catch (err) {
     renderYouthList([]);
     setYouthStatus(err.message || '온통청년 목록을 가져오지 못했습니다.');
@@ -430,7 +456,16 @@ async function pickYouthPolicy(id, source, button) {
   if (button) button.disabled = true;
   setYouthStatus('선택한 항목의 상세를 불러오는 중입니다.');
   try {
-    const res = await fetch(`/api/policies?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source || 'policy')}`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let res;
+    try {
+      res = await fetch(`/api/policies?id=${encodeURIComponent(id)}&source=${encodeURIComponent(source || 'policy')}`, {
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data.error || '정책 상세를 가져오지 못했습니다.');
