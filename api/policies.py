@@ -35,8 +35,8 @@ CONTENT_URL = BASE_URL + "/go/ythip/getContent"
 SPACE_URL = BASE_URL + "/go/ythip/getSpace"
 
 TIMEOUT = 3.0
-MAX_RETRIES = 1
-BACKOFF = 0.2
+MAX_RETRIES = 2
+BACKOFF = 0.35
 PAGE_SIZE = 12
 SOURCE_PAGE_SIZE = {"policy": 12, "content": 2, "space": 10}
 SOURCE_DEADLINE = 3.6
@@ -139,6 +139,21 @@ def _xml_to_dict(element):
     return result
 
 
+def _log(trace, *parts):
+    line = "YOUTH_TRACE " + " | ".join("" if p is None else str(p) for p in parts)
+    print(line)
+    if trace is not None:
+        trace.append(line)
+
+
+def _redact_query(query):
+    out = dict(query or {})
+    for key in ("apiKeyNm", "openApiVlak"):
+        if out.get(key):
+            out[key] = "set(len=%s)" % len(str(out[key]))
+    return out
+
+
 def _parse_body(text, content_type=""):
     text = (text or "").strip()
     if not text:
@@ -149,11 +164,12 @@ def _parse_body(text, content_type=""):
     return _xml_to_dict(root)
 
 
-def youth_get(url, params, key_name):
+def youth_get(url, params, key_name, trace=None):
     """client.YouthApiClient.get 과 같은 인증·재시도."""
     endpoint = _safe_url(url)
     key = _secret(key_name)
     if not key:
+        _log(trace, "youth_get", "missing_key", key_name, endpoint)
         raise YouthApiError("missing_key", key_name + " is not set")
 
     query = dict(params or {})
@@ -165,6 +181,8 @@ def youth_get(url, params, key_name):
 
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
+        started = time.time()
+        _log(trace, "youth_get.start", endpoint, "attempt", attempt, "query", _redact_query(query))
         try:
             req = Request(
                 endpoint + "?" + urlencode(query),
@@ -173,20 +191,33 @@ def youth_get(url, params, key_name):
             with urlopen(req, timeout=TIMEOUT) as resp:
                 blob = resp.read(MAX_BODY_BYTES + 1)
                 if len(blob) > MAX_BODY_BYTES:
+                    _log(trace, "youth_get.too_large", endpoint, "bytes", len(blob))
                     raise YouthApiError("too_large", "response too large")
                 raw = blob.decode("utf-8", errors="replace")
                 ctype = resp.headers.get("Content-Type", "")
-            return _parse_body(raw, ctype)
+            parsed = _parse_body(raw, ctype)
+            top_keys = list(parsed.keys())[:12] if isinstance(parsed, dict) else type(parsed).__name__
+            _log(
+                trace, "youth_get.ok", endpoint, "ms", int((time.time() - started) * 1000),
+                "bytes", len(blob), "ctype", ctype, "keys", top_keys,
+                "resultCode", parsed.get("resultCode") if isinstance(parsed, dict) else "",
+                "resultMessage", parsed.get("resultMessage") if isinstance(parsed, dict) else "",
+            )
+            return parsed
         except HTTPError as exc:
             last_error = YouthApiError("http_%s" % exc.code, str(exc))
-            if exc.code < 500 and exc.code != 403:
+            _log(trace, "youth_get.http", endpoint, "code", exc.code, "ms", int((time.time() - started) * 1000))
+            if exc.code < 500 and exc.code not in {400, 403}:
                 raise last_error
         except URLError as exc:
             last_error = YouthApiError("network", str(exc.reason if hasattr(exc, "reason") else exc))
+            _log(trace, "youth_get.network", endpoint, last_error, "ms", int((time.time() - started) * 1000))
         except Exception as exc:
             last_error = YouthApiError("parse", str(exc))
+            _log(trace, "youth_get.parse", endpoint, type(exc).__name__, exc, "ms", int((time.time() - started) * 1000))
         if attempt < MAX_RETRIES:
             time.sleep(BACKOFF * attempt)
+    _log(trace, "youth_get.fail", endpoint, getattr(last_error, "code", ""), last_error)
     raise last_error or YouthApiError("unknown", "unknown API error")
 
 
@@ -273,7 +304,7 @@ SIDO_ZIP_PREFIXES = {
     "부산": ("26",),
     "대구": ("27",),
     "인천": ("28",),
-    "광주": ("29",),
+    "광주": ("29", "12"),
     "대전": ("30",),
     "울산": ("31",),
     "세종": ("36",),
@@ -282,7 +313,7 @@ SIDO_ZIP_PREFIXES = {
     "충북": ("43",),
     "충남": ("44",),
     "전북": ("45", "52"),
-    "전남": ("46",),
+    "전남": ("46", "12"),
     "경북": ("47",),
     "경남": ("48",),
     "제주": ("50", "63"),
@@ -358,13 +389,14 @@ def region_ok(item, city, source):
         text = _blob(item)
         if city in text:
             return True, "본문·제목에 시·도명"
-        if len(codes) >= 5:
-            return True, "전국(지역 코드 다수)"
         if not codes:
             return True, "지역 미지정(전국으로 봄)"
+        sides = {code[:2] for code in codes}
+        if len(sides) >= 4:
+            return True, "전국(%s개 시·도)" % len(sides)
         if prefixes and any(code.startswith(prefixes) for code in codes):
             return True, "지역 코드 일치"
-        return False, "다른 시·도 사업"
+        return False, "다른 시·도 사업(코드 %s)" % ",".join(sorted(sides))
 
     text = " ".join(
         str(item.get(k) or "")
@@ -476,43 +508,62 @@ def _run_deadline(fn, seconds, *args):
     return box.get("value")
 
 
-def fetch_source_page(source):
+def fetch_source_page(source, trace=None):
     # getContent 목록은 항목 1개도 본문이 약 1MB라 Vercel에서 자주 멈춘다.
     if source == "content":
+        _log(trace, "fetch_source.skip", source, "content payload too large")
         raise YouthApiError("skipped", "콘텐츠 목록 응답이 커서 고르기에서 생략")
     meta = SOURCE_META[source]
     params = policy_list_params(1)
     params["pageSize"] = SOURCE_PAGE_SIZE.get(source, PAGE_SIZE)
-    payload = youth_get(meta["url"], params, meta["key"])
-    return extract_items(payload)
+    _log(trace, "fetch_source.begin", source, "url", meta["url"], "pageSize", params["pageSize"], "key", meta["key"], "set", bool(_secret(meta["key"])))
+    payload = youth_get(meta["url"], params, meta["key"], trace=trace)
+    items = extract_items(payload)
+    _log(trace, "fetch_source.items", source, "count", len(items))
+    return items
 
 
-def _filter_source(source, raw_items, query, age, city, limit=8):
+def _filter_source(source, raw_items, query, age, city, limit=8, trace=None):
     rows = []
     kept = 0
-    for item in raw_items:
+    dropped = {"query": 0, "age": 0, "region": 0, "no_id": 0}
+    for index, item in enumerate(raw_items):
+        title = str(item.get("plcyNm") or item.get("cntrNm") or item.get("pstTtl") or "")[:40]
+        zip_cd = str(item.get("zipCd") or "")[:80]
+        age_min = item.get("sprtTrgtMinAge")
+        age_max = item.get("sprtTrgtMaxAge")
         if not _matches_query(item, query, source):
+            dropped["query"] += 1
+            _log(trace, "filter.drop", source, index, "query", title)
             continue
         ok_age, why_age = age_ok(item, age) if source == "policy" else (True, "해당 없음")
         if not ok_age:
+            dropped["age"] += 1
+            _log(trace, "filter.drop", source, index, "age", why_age, "min", age_min, "max", age_max, "ask", age, title)
             continue
         ok_region, why_region = region_ok(item, city, source)
         if not ok_region:
+            dropped["region"] += 1
+            _log(trace, "filter.drop", source, index, "region", why_region, "city", city, "zip", zip_cd, title)
             continue
         card = summarize(item, source)
         if not card["id"]:
+            dropped["no_id"] += 1
+            _log(trace, "filter.drop", source, index, "no_id", title)
             continue
         card["age_check"] = why_age
         card["region_check"] = why_region
         kept += 1
+        _log(trace, "filter.keep", source, index, why_age, why_region, "id", card["id"], title)
         if len(rows) < limit:
             rows.append(card)
+    _log(trace, "filter.done", source, "raw", len(raw_items), "kept", kept, "shown", len(rows), "dropped", dropped)
     return rows, kept
 
 
-def _load_one_source(source, query, age, city):
-    raw_items = fetch_source_page(source)
-    rows, kept = _filter_source(source, raw_items, query, age, city)
+def _load_one_source(source, query, age, city, trace=None):
+    raw_items = fetch_source_page(source, trace=trace)
+    rows, kept = _filter_source(source, raw_items, query, age, city, trace=trace)
     return {
         "source": source,
         "rows": rows,
@@ -522,7 +573,7 @@ def _load_one_source(source, query, age, city):
     }
 
 
-def list_catalog(query="", age=None, city="", sources=None):
+def list_catalog(query="", age=None, city="", sources=None, trace=None):
     wanted = sources or ("policy", "content", "space")
     sent = {
         "pageNum": 1,
@@ -534,14 +585,16 @@ def list_catalog(query="", age=None, city="", sources=None):
         "region": city,
         "sources": list(wanted),
     }
+    _log(trace, "list_catalog.begin", "age", age, "city", city, "query", query, "sources", list(wanted))
     box = {}
 
     def run(source):
         try:
             box[source] = _run_deadline(
-                _load_one_source, SOURCE_DEADLINE, source, query, age, city
+                _load_one_source, SOURCE_DEADLINE, source, query, age, city, trace
             )
         except YouthApiError as exc:
+            _log(trace, "list_catalog.source_error", source, exc.code, exc)
             box[source] = {
                 "source": source,
                 "rows": [],
@@ -557,7 +610,7 @@ def list_catalog(query="", age=None, city="", sources=None):
                 "kept": 0,
                 "error": "error",
             }
-            print("YOUTH_SOURCE_ERROR:", source, repr(exc))
+            _log(trace, "list_catalog.source_crash", source, repr(exc))
 
     threads = []
     for source in wanted:
@@ -584,6 +637,7 @@ def list_catalog(query="", age=None, city="", sources=None):
             "kept": row["kept"],
             "error": row["error"],
         }
+    _log(trace, "list_catalog.done", "shown", len(rows), "stats", stats)
     return rows, sent, stats
 
 
@@ -595,7 +649,7 @@ def list_policies(query, scope):
     return rows
 
 
-def policy_detail(item_id, source="policy"):
+def policy_detail(item_id, source="policy", trace=None):
     meta = SOURCE_META.get(source) or SOURCE_META["policy"]
     if source == "content":
         params = {"pageType": "2", "pstSn": item_id, "rtnType": "json"}
@@ -603,13 +657,16 @@ def policy_detail(item_id, source="policy"):
         params = {"pageType": 2, "plcSn": item_id, "rtnType": "json"}
     else:
         params = policy_detail_params(item_id)
-    payload = youth_get(meta["url"], params, meta["key"])
+    _log(trace, "detail.begin", source, "id", item_id, "params", params)
+    payload = youth_get(meta["url"], params, meta["key"], trace=trace)
     items = extract_items(payload)
+    _log(trace, "detail.items", source, "count", len(items))
     if not items:
         raise YouthApiError("not_found", "item not found")
     item = items[0]
     card = summarize(item, source)
     card["text"] = flatten(item, source)
+    _log(trace, "detail.ok", source, "id", card.get("id"), "title", card.get("title"), "text_len", len(card.get("text") or ""))
     return card
 
 
@@ -672,20 +729,26 @@ class handler(BaseHTTPRequestHandler):
             age = None
         city = re.sub(r"\s+", " ", (qs.get("region") or [""])[0]).strip()[:30]
         debug = (qs.get("debug") or [""])[0] in {"1", "true", "yes"}
+        trace = []
+        _log(trace, "http.get", "path", self.path, "source", source, "age", age, "city", city, "id", item_id, "debug", debug)
 
         try:
             if item_id:
                 detail_source = source if source in SOURCE_META else "policy"
-                item = _run_deadline(policy_detail, SOURCE_DEADLINE + 1.0, item_id, detail_source)
-                _send(self, 200, {"item": item})
+                item = _run_deadline(policy_detail, SOURCE_DEADLINE + 1.0, item_id, detail_source, trace)
+                payload = {"item": item}
+                if debug:
+                    payload["trace"] = trace
+                _send(self, 200, payload)
             else:
                 sources = tuple(SOURCE_META) if source == "all" else (source,)
-                items, sent, stats = list_catalog(query=query, age=age, city=city, sources=sources)
+                items, sent, stats = list_catalog(query=query, age=age, city=city, sources=sources, trace=trace)
                 payload = {"items": items, "count": len(items), "stats": stats, "applied": {
                     "age": age, "region": city, "sources": list(sources),
                 }}
                 if debug:
                     payload["request"] = sent
+                    payload["trace"] = trace
                 _send(self, 200, payload)
         except YouthApiError as exc:
             if exc.code == "missing_key":

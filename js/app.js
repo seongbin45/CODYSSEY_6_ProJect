@@ -433,12 +433,18 @@ async function fetchLivePolicies() {
   if (els.liveStatus) els.liveStatus.textContent = "온통청년에서 같은 나이·지역 정책을 가져오는 중입니다.";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 7000);
-  const params = new URLSearchParams({ source: "policy" });
+  const params = new URLSearchParams({ source: "policy", debug: "1" });
   if (a.age != null) params.set("age", String(a.age));
   if (a.region) params.set("region", a.region);
+  const url = `/api/policies?${params.toString()}`;
+  console.info("[YOUTH_TRACE] fetch.start", url);
   try {
-    const res = await fetch(`/api/policies?${params.toString()}`, { signal: controller.signal });
+    const res = await fetch(url, { signal: controller.signal });
     const data = await res.json().catch(() => ({}));
+    console.info("[YOUTH_TRACE] fetch.done", res.status, "count", data.count, "stats", data.stats, "applied", data.applied);
+    if (Array.isArray(data.trace)) {
+      data.trace.forEach((line) => console.info(line));
+    }
     if (ticket !== state.liveFetch) return;
     if (!res.ok) {
       throw new Error(data.error || "연결 실패");
