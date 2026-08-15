@@ -165,6 +165,16 @@ body.menu-open { overflow: hidden; }
   margin: 0 0 var(--sp-6);
 }
 
+.expect-banner {
+  margin: 0 0 var(--sp-6);
+  padding: var(--sp-4);
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--c-primary) 35%, var(--c-border));
+  background: color-mix(in srgb, var(--c-primary) 8%, var(--c-surface));
+  color: var(--c-text);
+  font-size: 0.95rem;
+}
+
 .btn-primary,
 .btn-ghost {
   display: inline-flex;
@@ -256,6 +266,99 @@ textarea {
   justify-content: space-between;
   gap: var(--sp-3);
   margin: var(--sp-3) 0 var(--sp-4);
+}
+
+.profile-box {
+  margin: 0 0 var(--sp-6);
+  padding: 0;
+  border: 0;
+}
+
+.profile-box legend,
+.youth-box legend {
+  padding: 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.profile-grid {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.profile-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--c-muted);
+}
+
+.geo-hint {
+  margin: var(--sp-3) 0 0;
+  color: var(--c-muted);
+  font-size: 0.88rem;
+}
+
+.geo-hint:empty { display: none; }
+
+.profile-grid input,
+.profile-grid select {
+  width: 100%;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--c-bg);
+  color: var(--c-text);
+}
+
+.verdict {
+  padding: var(--sp-8) var(--sp-6);
+  border-radius: var(--radius);
+  text-align: center;
+  border: 2px solid var(--c-border);
+}
+
+.verdict-kicker {
+  margin: 0 0 var(--sp-2);
+  letter-spacing: 0.08em;
+  font-size: 0.85rem;
+  color: var(--c-muted);
+}
+
+.verdict h3 {
+  margin: 0;
+  font-size: clamp(2.4rem, 8vw, 3.6rem);
+  line-height: 1.05;
+}
+
+.verdict p {
+  margin: var(--sp-3) 0 0;
+}
+
+.verdict-yes {
+  background: color-mix(in srgb, var(--c-accent) 14%, var(--c-surface));
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.verdict-no {
+  background: color-mix(in srgb, var(--c-danger) 12%, var(--c-surface));
+  border-color: var(--c-danger);
+  color: var(--c-danger);
+}
+
+.verdict-unknown {
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.mark-yes { color: var(--c-accent); font-weight: 800; }
+.mark-no { color: var(--c-danger); font-weight: 800; }
+.mark-unknown { color: var(--c-muted); font-weight: 700; }
+
+@media (min-width: 640px) {
+  .profile-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 #char-count { color: var(--c-muted); font-size: 0.92rem; }

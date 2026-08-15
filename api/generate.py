@@ -15,52 +15,55 @@ MODEL_CANDIDATES = [
 MIN_INPUT_LEN = 10
 MAX_INPUT_LEN = 2000
 
-SYSTEM_PROMPT = """당신은 청년 정책 공고문을 쉬운 말로 풀어주는 해설자입니다.
-사용자가 붙여넣은 공고문 텍스트를 읽고, 아래 규칙에 따라 JSON만 출력하세요.
+SYSTEM_PROMPT = """당신은 청년 정책 공고문을 읽고, 신청자 조건과 대조해
+**됩니다 / 안됩니다** 결론을 내는 판정자입니다.
+
+입력은 [신청자 조건] 과 [공고문] 두 덩어리입니다.
 
 # 절대 규칙
-1. 입력된 텍스트에 실제로 적혀 있는 내용만 사용합니다.
-2. 원문에 없는 정보는 절대 만들어내지 마세요. 일반 상식이나 다른 정책 지식으로
-   빈칸을 채우지 마세요.
+1. 공고문에 실제로 적힌 조건만 사용합니다. 없는 기준을 만들지 마세요.
+2. 신청자 조건에 적힌 사실만 대조합니다. 소득·서류처럼 모르는 값은 지어내지 마세요.
 3. 원문에서 확인할 수 없는 항목은 "공고문에 명시되지 않음" 이라고 적으세요.
-4. 지원 자격을 최종 판정하지 마세요. "대상입니다" / "해당됩니다" 같은 단정 표현을
-   쓰지 말고, 사용자가 스스로 확인할 수 있도록 조건을 항목으로 분해만 하세요.
-5. 입력이 정책·지원사업 공고문이 아니면 is_policy 를 false 로 하고
-   나머지 필드는 빈 배열 또는 빈 문자열로 두세요.
-6. 입력에 "첨부 공고문 참조", "세부 사항은 별도 안내" 같은 표현이 있으면,
-   해당 항목은 반드시 "공고문에 명시되지 않음" 으로 처리합니다.
-   다른 유사 정책의 일반적인 기준을 가져오는 것을 금지합니다.
+4. 입력이 정책·지원사업 공고문이 아니면 is_policy 를 false 로 하고
+   verdict 는 "unknown" 으로 두세요.
+5. "첨부 공고문 참조"만 있고 구체 조건이 없으면 해당 항목은 명시되지 않음입니다.
+
+# 판정 규칙 (가장 중요)
+- 나이·거주처럼 숫자/지역으로 확인되는 조건이 **하나라도 불충족**이면 verdict 는 "no".
+- 그런 핵심 조건이 모두 충족이고, 불충족이 없으면 verdict 는 "yes".
+- 나이/거주가 비었거나, 소득처럼 알 수 없는 필수 조건만 남아 있으면 "unknown".
+- "관심이 있는 자", "성실한 자" 같은 주관 조건은 결론을 막지 않습니다.
 
 # 문체
-- 존댓말, 행정 용어 대신 일상어를 사용합니다.
-- 각 요약 문장은 45자 이내로 씁니다.
-- 어려운 용어가 나오면 terms 에 풀이를 넣습니다. 최대 4개.
+- 존댓말, 짧은 일상어. 요약 문장은 45자 이내. terms 최대 4개.
 
 # 출력 형식
-아래 구조의 JSON 객체 하나만 출력합니다.
-설명 문장, 인사말, 마크다운 코드펜스(```) 를 절대 붙이지 마세요.
+JSON 객체 하나만 출력합니다. 코드펜스와 인사말은 금지입니다.
 
 {
   "is_policy": true 또는 false,
-  "title": "공고문에서 파악한 사업명 (없으면 빈 문자열)",
+  "verdict": "yes" 또는 "no" 또는 "unknown",
+  "verdict_reason": "됩니다/안됩니다를 한 문장으로. 예: 만 24세·해당 시 거주라 나이와 지역 조건에 들어갑니다.",
+  "title": "사업명",
   "summary": ["무슨 사업인지", "무엇을 얼마나 지원하는지", "누가 어떻게 신청하는지"],
   "eligibility": [
-    {"item": "조건을 한 문장으로", "note": "판단 기준일이나 예외. 없으면 빈 문자열"}
+    {
+      "item": "조건을 한 문장으로",
+      "note": "판단 기준. 없으면 빈 문자열",
+      "match": "yes" 또는 "no" 또는 "unknown"
+    }
   ],
   "documents": ["필요한 서류명"],
-  "deadline": "신청 기한. 원문에 없으면 공고문에 명시되지 않음",
-  "terms": [
-    {"word": "용어", "meaning": "한 문장 풀이"}
-  ]
+  "deadline": "신청 기한",
+  "terms": [{"word": "용어", "meaning": "한 문장 풀이"}]
 }
 
 # 항목별 지침
 - summary: 정확히 3개.
-- eligibility: 원문의 자격 조건을 하나씩 분해합니다. 최대 8개.
-  "만 19~34세", "군산시 거주", "기준 중위소득 150% 이하" 처럼
-  사용자가 O/X 로 답할 수 있는 단위로 쪼개세요.
-- documents: 본문과 별첨에 흩어진 서류를 모두 모읍니다. 원문에 없으면 빈 배열.
-- deadline: 날짜와 시각까지 원문 그대로 옮깁니다.
+- eligibility: 최대 8개. 나이·거주·소득처럼 O/X 로 쪼갭니다.
+  match 는 신청자 조건과 그 항목만 보고 정합니다.
+- documents: 원문에 있는 서류만.
+- deadline: 원문 날짜를 그대로.
 """
 
 # ── 유틸 ──────────────────────────────────────────────
@@ -130,21 +133,96 @@ def extract_json(text):
     return json.loads(t[start:end + 1])
 
 
+def parse_profile(data):
+    age = data.get("age")
+    try:
+        age = int(age)
+    except (TypeError, ValueError):
+        age = None
+    if age is not None and (age < 15 or age > 80):
+        age = None
+    region = re.sub(r"\s+", " ", str(data.get("region") or "")).strip()
+    if len(region) > 30:
+        region = region[:30]
+    employment = str(data.get("employment") or "")
+    if employment not in {"unemployed", "employed", "founder", "student"}:
+        employment = ""
+    return {"age": age, "region": region, "employment": employment}
+
+
+def profile_text(profile):
+    emp_map = {
+        "unemployed": "미취업/구직",
+        "employed": "취업/재직",
+        "founder": "창업",
+        "student": "학생",
+    }
+    bits = []
+    if profile["age"] is not None:
+        bits.append("만나이 %s세" % profile["age"])
+    if profile["region"]:
+        bits.append("%s 거주" % profile["region"])
+    if profile["employment"]:
+        bits.append(emp_map[profile["employment"]])
+    return ", ".join(bits) or "조건 미입력"
+
+
+def _norm_match(value):
+    v = str(value or "").strip().lower()
+    if v in {"yes", "y", "true", "됩니다", "충족"}:
+        return "yes"
+    if v in {"no", "n", "false", "안됩니다", "불충족"}:
+        return "no"
+    return "unknown"
+
+
+def derive_verdict(eligibility):
+    matches = [e.get("match") for e in eligibility]
+    if "no" in matches:
+        return "no"
+    if matches and all(m == "yes" for m in matches):
+        return "yes"
+    hard = [e for e in eligibility if any(k in e.get("item", "") for k in ("세", "연령", "나이", "거주", "주소", "시", "군"))]
+    hard_matches = [e.get("match") for e in hard]
+    if "no" in hard_matches:
+        return "no"
+    if hard and all(m == "yes" for m in hard_matches) and "no" not in matches:
+        return "yes"
+    return "unknown"
+
+
 def normalize(data):
     """필드 누락에 대비해 기본값을 채운다. 프론트 렌더링이 터지지 않게."""
     if not isinstance(data, dict):
         raise ValueError("JSON 객체가 아닙니다.")
 
+    eligibility = []
+    for item in (data.get("eligibility") or []):
+        if not isinstance(item, dict):
+            continue
+        eligibility.append({
+            "item": str(item.get("item", "")),
+            "note": str(item.get("note", "") or ""),
+            "match": _norm_match(item.get("match")),
+        })
+        if len(eligibility) >= 8:
+            break
+
+    verdict = str(data.get("verdict") or "").strip().lower()
+    if verdict not in {"yes", "no", "unknown"}:
+        verdict = derive_verdict(eligibility)
+    elif verdict == "yes" and any(e["match"] == "no" for e in eligibility):
+        verdict = "no"
+
     return {
-        "is_policy":   bool(data.get("is_policy", False)),
-        "title":       str(data.get("title") or ""),
-        "summary":     [str(s) for s in (data.get("summary") or [])][:3],
-        "eligibility": [
-            {"item": str(e.get("item", "")), "note": str(e.get("note", "") or "")}
-            for e in (data.get("eligibility") or []) if isinstance(e, dict)
-        ][:8],
-        "documents":   [str(d) for d in (data.get("documents") or [])],
-        "deadline":    str(data.get("deadline") or "공고문에 명시되지 않음"),
+        "is_policy": bool(data.get("is_policy", False)),
+        "verdict": verdict,
+        "verdict_reason": str(data.get("verdict_reason") or ""),
+        "title": str(data.get("title") or ""),
+        "summary": [str(s) for s in (data.get("summary") or [])][:3],
+        "eligibility": eligibility,
+        "documents": [str(d) for d in (data.get("documents") or [])],
+        "deadline": str(data.get("deadline") or "공고문에 명시되지 않음"),
         "terms": [
             {"word": str(t.get("word", "")), "meaning": str(t.get("meaning", ""))}
             for t in (data.get("terms") or []) if isinstance(t, dict)
@@ -185,6 +263,13 @@ class handler(BaseHTTPRequestHandler):
             self._send(400, {"error": f"{MAX_INPUT_LEN:,}자까지 입력할 수 있습니다. 지원 자격·서류·기한 부분만 붙여넣어 보세요."})
             return
 
+        profile = parse_profile(data)
+        if profile["age"] is None or not profile["region"]:
+            self._send(400, {"error": "됩니다·안됩니다를 보려면 만나이와 거주 시·군을 먼저 넣어 주세요."})
+            return
+
+        prompt = "[신청자 조건]\n%s\n\n[공고문]\n%s" % (profile_text(profile), text)
+
         # ③ 환경변수 확인 (6번)
         if not os.environ.get("GEMINI_API_KEY"):
             print("CONFIG_ERROR: GEMINI_API_KEY is missing")
@@ -193,7 +278,7 @@ class handler(BaseHTTPRequestHandler):
 
         # ④ AI 호출 (4번)
         try:
-            output = call_gemini(text)
+            output = call_gemini(prompt)
         except Exception as e:
             print("GEMINI_ERROR:", repr(e))
             self._send(502, {"error": "결과를 가져오지 못했습니다. 잠시 후 다시 시도해 주세요."})

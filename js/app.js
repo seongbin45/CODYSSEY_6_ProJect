@@ -50,6 +50,10 @@ const youthQuery = document.getElementById('youth-query');
 const youthLoadBtn = document.getElementById('youth-load-btn');
 const youthStatus = document.getElementById('youth-status');
 const youthList = document.getElementById('youth-list');
+const userAge = document.getElementById('user-age');
+const userRegion = document.getElementById('user-region');
+const userEmployment = document.getElementById('user-employment');
+const geoHint = document.getElementById('geo-hint');
 const hamburger = document.querySelector('.hamburger');
 const navLinks  = document.querySelector('.nav-links');
 const themeBtn  = document.getElementById('theme-toggle');
@@ -63,8 +67,41 @@ function updateCounter() {
 
 input.addEventListener('input', updateCounter);
 
+let regionTouched = false;
+if (userRegion) {
+  userRegion.addEventListener('input', () => { regionTouched = true; });
+  userRegion.addEventListener('change', () => { regionTouched = true; });
+}
+
+async function suggestRegionFromIp() {
+  if (!userRegion || regionTouched) return;
+  try {
+    const res = await fetch('/api/geo');
+    const data = await res.json().catch(() => ({}));
+    const place = (data.city || data.label || data.region || '').trim();
+    if (!res.ok || !place) return;
+    if (regionTouched) return;
+    userRegion.value = place;
+    if (geoHint) {
+      geoHint.textContent = `접속 위치를 기준으로 「${place}」을 추천했습니다. 다르면 직접 바꿔 주세요.`;
+    }
+  } catch (_) {
+    if (geoHint) geoHint.textContent = '';
+  }
+}
+
 // ── 통신 ──────────────────────────────────────────────
-async function requestSummary(text) {
+function readProfile() {
+  const ageRaw = userAge ? userAge.value.trim() : '';
+  const age = ageRaw === '' ? null : Number(ageRaw);
+  return {
+    age: Number.isInteger(age) ? age : null,
+    region: (userRegion && userRegion.value.trim()) || '',
+    employment: (userEmployment && userEmployment.value) || '',
+  };
+}
+
+async function requestSummary(text, profile) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -72,7 +109,12 @@ async function requestSummary(text) {
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: text }),
+      body: JSON.stringify({
+        input: text,
+        age: profile.age,
+        region: profile.region,
+        employment: profile.employment,
+      }),
       signal: controller.signal,
     });
 
@@ -126,25 +168,41 @@ function render(r) {
   const eligibility = Array.isArray(r.eligibility) ? r.eligibility : [];
   const documents = Array.isArray(r.documents) ? r.documents : [];
   const terms = Array.isArray(r.terms) ? r.terms : [];
+  const verdict = r.verdict === 'yes' ? 'yes' : r.verdict === 'no' ? 'no' : 'unknown';
+  const verdictCopy = {
+    yes: { label: '됩니다', reason: r.verdict_reason || '입력한 조건으로 보면 이 공고의 핵심 자격에 들어갑니다.' },
+    no: { label: '안됩니다', reason: r.verdict_reason || '입력한 조건으로는 이 공고의 자격에 들지 않습니다.' },
+    unknown: { label: '지금은 단정하기 어려워요', reason: r.verdict_reason || '나이·거주 외에 소득처럼 확인할 수 없는 조건이 남아 있습니다.' },
+  }[verdict];
+  const matchLabel = { yes: '됩니다', no: '안됩니다', unknown: '확인 필요' };
 
   const block = (title, inner) =>
     `<section class="result-block"><h3>${esc(title)}</h3>${inner}</section>`;
 
   const html = [
+    `<section class="verdict verdict-${verdict}" aria-live="assertive">
+      <p class="verdict-kicker">참고 결론 · 최종 자격 확정 아님</p>
+      <h3>${esc(verdictCopy.label)}</h3>
+      <p>${esc(verdictCopy.reason)}</p>
+    </section>`,
+
     r.title ? `<p class="result-title">${esc(r.title)}</p>` : '',
 
     block('한눈에 보기',
       `<ol class="summary">${summary.map(s => `<li>${esc(s)}</li>`).join('')}</ol>`),
 
-    block('내가 대상인지 확인하기',
+    block('조건별 판정',
       eligibility.length
-        ? `<ul class="checklist">${eligibility.map((e, i) => `
+        ? `<ul class="checklist">${eligibility.map((e, i) => {
+            const match = e.match === 'yes' || e.match === 'no' ? e.match : 'unknown';
+            return `
             <li>
-              <input type="checkbox" id="elig-${i}">
+              <span class="mark-${match}">${esc(matchLabel[match])}</span>
               <label for="elig-${i}">${esc(e.item)}
                 ${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}
               </label>
-            </li>`).join('')}</ul>`
+            </li>`;
+          }).join('')}</ul>`
         : '<p class="empty">공고문에서 자격 조건을 찾지 못했습니다.</p>'),
 
     block('준비할 서류',
@@ -160,8 +218,9 @@ function render(r) {
             `<dt>${esc(t.word)}</dt><dd>${esc(t.meaning)}</dd>`).join('')}</dl>`)
       : '',
 
-    `<p class="disclaimer">⚠️ 이 결과는 AI가 붙여넣은 텍스트만 보고 정리한 참고 자료입니다.
-      최종 자격과 서류는 반드시 공고 원문과 담당 기관을 통해 확인하세요.</p>`,
+    `<p class="disclaimer">⚠️ AI가 지원 가능 여부를 대신 결정하지 않습니다.
+      됩니다 / 안됩니다는 입력한 조건과 붙여넣은 문장만 본 참고 결론입니다.
+      최종 자격과 서류는 공고 원문과 담당 기관에서 확인하세요.</p>`,
   ].join('');
 
   result.innerHTML = html;
@@ -170,10 +229,10 @@ function render(r) {
 // ── 상태 전환 ─────────────────────────────────────────
 function setLoading(on) {
   btn.disabled = on;
-  btn.textContent = on ? '정리하는 중...' : '결과 확인하기';
+  btn.textContent = on ? '공고문을 읽는 중...' : '참고 결론 보기';
   if (on) {
     notice.textContent = '';
-    result.innerHTML = '<p class="loading-hint" aria-busy="true">공고문을 읽고 있습니다. 잠시만 기다려 주세요.</p>';
+    result.innerHTML = '<p class="loading-hint" aria-busy="true">공고 조건을 나누고 있습니다. 잠시만 기다려 주세요.</p>';
   }
 }
 
@@ -182,8 +241,19 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
 
   const text = input.value.trim();
+  const profile = readProfile();
 
   // 클라이언트 1차 검증 — 서버 왕복 없이 즉시 안내 (무료 쿼터 절약)
+  if (profile.age == null) {
+    showError('됩니다·안됩니다를 보려면 만나이를 넣어 주세요.');
+    if (userAge) userAge.focus();
+    return;
+  }
+  if (!profile.region) {
+    showError('거주 시·군을 입력해 주세요.');
+    if (userRegion) userRegion.focus();
+    return;
+  }
   if (!text) {
     showError('공고문 내용을 붙여넣어 주세요.');
     input.focus();
@@ -202,7 +272,7 @@ form.addEventListener('submit', async (e) => {
 
   setLoading(true);
   try {
-    render(await requestSummary(text));
+    render(await requestSummary(text, profile));
   } catch (err) {
     showError(err.message);
   } finally {
@@ -242,9 +312,9 @@ async function loadYouthPolicies() {
   if (!youthLoadBtn) return;
   const q = (youthQuery && youthQuery.value.trim()) || '';
   youthLoadBtn.disabled = true;
-  setYouthStatus('온통청년에서 전북·군산 정책을 찾는 중입니다.');
+  setYouthStatus('온통청년에서 정책을 찾는 중입니다.');
   try {
-    const params = new URLSearchParams({ scope: q.includes('군산') ? 'gunsan' : 'jeonbuk' });
+    const params = new URLSearchParams({ scope: 'all' });
     if (q) params.set('q', q);
     const res = await fetch(`/api/policies?${params.toString()}`);
     const data = await res.json().catch(() => ({}));
@@ -310,7 +380,7 @@ sampleBtn.addEventListener('click', () => {
 
 // ── 홈 CTA → 입력창 포커스 ────────────────────────────
 document.querySelectorAll('[data-goto-check]').forEach(el => {
-  el.addEventListener('click', () => setTimeout(() => input.focus(), 400));
+  el.addEventListener('click', () => setTimeout(() => (userAge || input).focus(), 400));
 });
 
 // ── 모바일 햄버거 메뉴 ────────────────────────────────
@@ -357,4 +427,36 @@ if (themeBtn) {
     localStorage.setItem('doenayo-theme', next);
     applyTheme(next);
   });
+}
+
+if (new URLSearchParams(location.search).get('demo') !== '1') {
+  suggestRegionFromIp();
+}
+
+// README·증빙용 미리보기: ?demo=1
+if (new URLSearchParams(location.search).get('demo') === '1') {
+  if (userAge) userAge.value = '24';
+  if (userRegion) userRegion.value = '군산';
+  input.value = SAMPLE_TEXT;
+  input.dispatchEvent(new Event('input'));
+  render({
+    is_policy: true,
+    verdict: 'yes',
+    verdict_reason: '만 24세·군산 거주라 나이와 지역 조건에 들어갑니다. 관심·SNS 조건은 직접 확인하세요.',
+    title: '2026 군산 청년 서포터즈 2기 참여자 모집',
+    summary: [
+      '군산시 청년 12명이 축제·관광 홍보를 하는 서포터즈입니다.',
+      '온라인 미션 성공 시 월 15만원을 받습니다.',
+      '6월 3일부터 25일까지 신청합니다.',
+    ],
+    eligibility: [
+      { item: '군산시에 주소를 둔 청년', note: '18세 이상 39세 이하', match: 'yes' },
+      { item: '만 18세 이상 39세 이하', note: '신청일 기준', match: 'yes' },
+      { item: '청년정책·사회참여에 관심이 있을 것', note: '주관 조건', match: 'unknown' },
+    ],
+    documents: ['참여신청서', '주민등록초본', '개인정보동의서', '활동계획서'],
+    deadline: '2026. 6. 3.(수) ~ 6. 25.(목)',
+    terms: [{ word: '기타소득', meaning: '근로소득이 아닌 일시적 수입입니다. 활동비에 세금이 붙는다는 뜻으로 자주 나옵니다.' }],
+  });
+  location.hash = '#check';
 }

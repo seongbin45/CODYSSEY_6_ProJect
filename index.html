@@ -32,11 +32,14 @@
       <p class="eyebrow">청년 정책 공고문 해설</p>
       <h1>그래서, 제가 되나요?</h1>
       <p class="lead">
-        청년 정책 공고문은 정보가 없어서가 아니라 읽히지 않아서 신청으로 이어지지 않습니다.
-        자격은 겹겹이 붙어 있고, 서류는 본문과 별첨에 흩어져 있습니다.
-        붙여넣으면 대상 여부부터 확인할 수 있게 풀어 드립니다.
+        공고문의 자격·서류·기한을 쪼개 보여 드립니다.
+        나이와 거주를 넣으면 <strong>참고 결론</strong>으로 됩니다 / 안됩니다를 붙입니다.
+        <strong>AI가 최종 지원 자격을 확정하지 않습니다.</strong>
       </p>
-      <a href="#check" class="btn-primary" data-goto-check>공고문 붙여넣고 확인하기</a>
+      <p class="expect-banner" role="note">
+        되나요는 공고 조건을 풀어 주는 서비스입니다. 지원 가능 여부의 최종 판단은 공고 원문과 담당 기관에 있습니다.
+      </p>
+      <a href="#check" class="btn-primary" data-goto-check>공고문 확인하고 참고 결론 보기</a>
 
       <ol class="steps">
         <li>
@@ -46,8 +49,8 @@
         </li>
         <li>
           <span class="step-num">2</span>
-          <h2>확인하기</h2>
-          <p>조건을 O/X로 쪼갠 체크리스트로, 내가 대상인지 스스로 봅니다.</p>
+          <h2>참고 결론</h2>
+          <p>나이·거주를 대조한 참고 답입니다. 최종 자격은 기관이 정합니다.</p>
         </li>
         <li>
           <span class="step-num">3</span>
@@ -60,18 +63,62 @@
     <section id="check" class="section">
       <h2>공고문 확인하기</h2>
       <p class="section-desc">
-        지원 자격, 제출 서류, 신청 기한이 담긴 부분을 붙여넣거나,
-        온통청년에서 전북·군산 정책을 골라 입력창에 넣을 수 있습니다.
-        고른 뒤에도 해설은 같은 방식으로 진행됩니다.
+        내 조건과 공고문을 넣으면 자격·서류·기한을 나누고, 맨 위에 <strong>참고 결론</strong>을 붙입니다.
+        AI는 최종 지원 여부를 확정하지 않습니다.
+      </p>
+      <p class="expect-banner" role="note">
+        됩니다 / 안됩니다는 입력한 나이·거주와 붙여넣은 문장만 본 참고입니다. 서류·소득 등 확인하지 못한 조건은 직접 대조하세요.
       </p>
 
       <form id="check-form">
+        <fieldset class="profile-box">
+          <legend>내 조건</legend>
+          <div class="profile-grid">
+            <label for="user-age">만나이
+              <input id="user-age" name="age" type="number" min="15" max="80" inputmode="numeric" placeholder="예: 24">
+            </label>
+            <label for="user-region">거주 시·군
+              <input id="user-region" name="region" type="text" list="region-suggest"
+                     autocomplete="address-level2" placeholder="예: 서울, 부산, 전주">
+              <datalist id="region-suggest">
+                <option value="서울"></option>
+                <option value="부산"></option>
+                <option value="인천"></option>
+                <option value="대구"></option>
+                <option value="대전"></option>
+                <option value="광주"></option>
+                <option value="울산"></option>
+                <option value="세종"></option>
+                <option value="수원"></option>
+                <option value="고양"></option>
+                <option value="용인"></option>
+                <option value="창원"></option>
+                <option value="청주"></option>
+                <option value="전주"></option>
+                <option value="천안"></option>
+                <option value="제주"></option>
+                <option value="군산"></option>
+              </datalist>
+            </label>
+            <label for="user-employment">상태
+              <select id="user-employment" name="employment">
+                <option value="">선택 안 함</option>
+                <option value="student">학생</option>
+                <option value="unemployed">구직 · 미취업</option>
+                <option value="employed">취업 · 재직</option>
+                <option value="founder">창업</option>
+              </select>
+            </label>
+          </div>
+          <p id="geo-hint" class="geo-hint" aria-live="polite"></p>
+        </fieldset>
+
         <fieldset class="youth-box">
           <legend>온통청년에서 고르기</legend>
-          <p class="youth-hint">군산 대시보드와 같은 온통청년 정책 API를 사용합니다. 목록에서 고르면 아래 입력창에 채워집니다.</p>
+          <p class="youth-hint">온통청년 정책 목록에서 골라 입력창에 넣을 수 있습니다. 지역명이나 주거·취업처럼 검색하세요.</p>
           <div class="youth-toolbar">
             <label for="youth-query" class="sr-only">정책 검색어</label>
-            <input id="youth-query" type="search" placeholder="예: 군산, 주거, 취업" autocomplete="off">
+            <input id="youth-query" type="search" placeholder="예: 주거, 취업, 지역명" autocomplete="off">
             <button type="button" id="youth-load-btn" class="btn-ghost">찾아보기</button>
           </div>
           <p id="youth-status" class="youth-status" aria-live="polite"></p>
@@ -80,7 +127,7 @@
 
         <label for="policy-input" class="sr-only">공고문 내용</label>
         <textarea id="policy-input" name="policy" rows="8"
-                  placeholder="예: 지원 대상 - 공고일 기준 군산시에 주민등록을 둔 만 19세~34세 청년으로서 ..."
+                  placeholder="예: 지원 대상 - 공고일 기준 해당 시·군에 주민등록을 둔 만 19세~34세 청년으로서 ..."
                   maxlength="4000"></textarea>
 
         <div class="form-meta">
@@ -88,7 +135,7 @@
           <button type="button" id="sample-btn" class="btn-ghost">샘플 넣어보기</button>
         </div>
 
-        <button type="submit" id="submit-btn" class="btn-primary">결과 확인하기</button>
+        <button type="submit" id="submit-btn" class="btn-primary">참고 결론 보기</button>
       </form>
 
       <div id="notice" class="notice" role="alert" aria-live="assertive"></div>
@@ -102,19 +149,19 @@
         <h3>이렇게 쓰면 됩니다</h3>
         <ol class="guide-steps">
           <li>공고문·HWP에서 자격·서류·기한 부분을 복사하거나, 온통청년 목록에서 고릅니다.</li>
-          <li>확인하기 입력창을 확인하고 결과 확인하기를 누릅니다.</li>
-          <li>체크리스트를 하나씩 보며 대상인지 스스로 판단합니다.</li>
+          <li>만나이와 거주를 넣고, 참고 결론 보기를 누릅니다.</li>
+          <li>맨 위는 참고 결론입니다. 조건·서류·기한을 원문과 대조하세요.</li>
           <li>서류 목록을 보고 원문과 담당 기관에서 최종 확인합니다.</li>
         </ol>
       </article>
 
       <article class="guide-block caution">
-        <h3>AI 요약의 한계</h3>
+        <h3>AI가 하지 않는 것</h3>
         <ul>
-          <li>붙여넣은 텍스트만 보고 정리합니다. 원문 전체나 첨부파일 내용은 모릅니다.</li>
-          <li>자격 여부를 판정하지 않습니다. 조건을 분해해 줄 뿐, 최종 판단은 사용자에게 있습니다.</li>
-          <li>원문에 없는 내용은 만들지 않습니다. 없으면 “공고문에 명시되지 않음”으로 표시합니다.</li>
-          <li>최종 자격과 서류는 반드시 공고 원문과 담당 기관을 통해 확인하세요.</li>
+          <li><strong>최종 자격 확정:</strong> 됩니다 / 안됩니다는 참고 결론입니다. 지원 가능 여부를 대신 결정하지 않습니다.</li>
+          <li>붙여넣은 텍스트만 봅니다. 원문 전체나 첨부파일은 모릅니다.</li>
+          <li>원문에 없는 내용은 만들지 않습니다. 없으면 “공고문에 명시되지 않음”입니다.</li>
+          <li>최종 자격과 서류는 공고 원문과 담당 기관에서 확인하세요.</li>
         </ul>
       </article>
 
@@ -136,10 +183,9 @@
         <h3>공식 출처</h3>
         <ul class="source-list">
           <li><a href="https://www.youthcenter.go.kr/" target="_blank" rel="noopener noreferrer">온통청년</a></li>
-          <li><a href="https://gsyouth.or.kr/main/m116/" target="_blank" rel="noopener noreferrer">군산시 청년정책 포털</a></li>
-          <li><a href="https://www.gunsan.go.kr/" target="_blank" rel="noopener noreferrer">군산시청</a></li>
+          <li><a href="https://www.gov.kr/" target="_blank" rel="noopener noreferrer">정부24</a></li>
         </ul>
-        <p class="source-note">샘플 공고문은 군산시 청년정책 포털에 게시된 「2026 군산 청년 서포터즈 2기 참여자 모집」 공고를 발췌한 것입니다.</p>
+        <p class="source-note">샘플은 이해를 돕기 위한 예시 공고입니다. 실제 신청은 해당 기관 공고를 확인하세요.</p>
       </article>
     </section>
 

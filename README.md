@@ -6,8 +6,17 @@
 🔗 **확인하기:** https://codyssey-6-pro-ject.vercel.app/#check  
 🔗 **GitHub:** https://github.com/seongbin45/CODYSSEY_6_ProJect
 
-<!-- TODO: images/screenshot.png 추가 후 아래 주석 해제 -->
-<!-- ![되나요 메인 화면](images/screenshot.png) -->
+**AI는 최종 지원 자격을 확정하지 않습니다.**  
+됩니다 / 안됩니다는 입력한 나이·거주와 공고문 문장만 본 **참고 결론**입니다. 최종은 공고 원문과 담당 기관에서 확인하세요.
+
+### 화면
+
+| 데스크톱 | 모바일 |
+|---|---|
+| ![홈](images/desktop-home.png) | ![홈(모바일)](images/mobile-home.png) |
+| ![확인하기·참고 결론](images/desktop-result.png) | ![확인하기(모바일)](images/mobile-result.png) |
+
+이용 안내(한계 고지): ![이용 안내](images/desktop-guide.png)
 
 ---
 
@@ -52,7 +61,7 @@
 | 섹션 | 기능 |
 |---|---|
 | 홈 (`#home`) | 문제 제기, 3단계 사용법, 확인하기로 바로 이동 |
-| **확인하기 (`#check`)** | 공고문 붙여넣기 또는 온통청년에서 고르기 → AI 변환 → 4블록 결과 |
+| **확인하기 (`#check`)** | 나이·거주 입력 + 공고문/온통청년 → **됩니다 / 안됩니다** 결론 + 조건별 판정 |
 | 이용 안내 (`#guide`) | 사용법, **AI 요약의 한계 고지**, 자주 나오는 용어 풀이, 공식 출처 링크 |
 
 ---

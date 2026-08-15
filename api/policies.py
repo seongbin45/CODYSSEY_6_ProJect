@@ -296,8 +296,6 @@ def list_policies(query, scope):
     # 참고 서비스는 전 페이지를 캐시한다. Vercel 한도 안에서는 1페이지.
     # getPlcy 는 zipCd 5자리만 받는다. 52130 = 군산시 (실측).
     params = policy_list_params(1)
-    if scope in {"gunsan", "jeonbuk"}:
-        params["zipCd"] = "52130"
     items = extract_items(youth_get(POLICY_URL, params, "YOUTH_API_KEY"))
     rows = []
     for item in items:
@@ -306,7 +304,7 @@ def list_policies(query, scope):
         score, label = region_score(item)
         if scope == "gunsan" and score < 50:
             continue
-        if scope != "all" and score < 30:
+        if scope == "jeonbuk" and score < 30:
             continue
         card = summarize(item, label)
         if not card["id"]:
@@ -346,9 +344,9 @@ class handler(BaseHTTPRequestHandler):
         qs = parse_qs(urlparse(self.path).query)
         plcy_no = (qs.get("id") or [""])[0].strip()
         query = (qs.get("q") or [""])[0].strip()
-        scope = (qs.get("scope") or ["jeonbuk"])[0].strip().lower()
+        scope = (qs.get("scope") or ["all"])[0].strip().lower()
         if scope not in {"gunsan", "jeonbuk", "all"}:
-            scope = "jeonbuk"
+            scope = "all"
 
         try:
             if plcy_no:
