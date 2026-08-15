@@ -361,16 +361,18 @@ function openDetail(id) {
   paintDetail(row);
   showScreen("detail");
   if (row.p.remoteId && row.p.remoteSource === "policy") {
-    fillLiveDetail(row);
+    fillLiveDetail(row, "/api/policies");
+  } else if (row.p.remoteId && row.p.remoteSource) {
+    fillLiveDetail(row, "/api/welfare");
   }
 }
 
-async function fillLiveDetail(row) {
+async function fillLiveDetail(row, endpoint) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const res = await fetch(
-      `/api/policies?id=${encodeURIComponent(row.p.remoteId)}&source=policy`,
+      `${endpoint}?id=${encodeURIComponent(row.p.remoteId)}&source=${encodeURIComponent(row.p.remoteSource || "policy")}&debug=1`,
       { signal: controller.signal }
     );
     const data = await res.json().catch(() => ({}));
@@ -473,11 +475,93 @@ async function fetchLivePolicies() {
   }
 }
 
+function govCardToRow(item) {
+  return {
+    p: {
+      id: item.id,
+      remoteId: item.remoteId,
+      remoteSource: item.remoteSource,
+      title: item.title,
+      org: item.org,
+      cat: item.cat || [],
+      summary: item.summary,
+      docs: item.docs || ["원문에서 확인"],
+      deadline: item.deadline || "원문에서 확인",
+      link: item.link,
+      linkLabel: item.linkLabel,
+    },
+    ev: {
+      verdict: "unknown",
+      reason: "공공데이터포털에서 가져온 항목입니다. 나이·소득 등 세부 자격은 원문에서 확인하세요.",
+      checks: [
+        { match: item.age_check ? "yes" : "unknown", text: item.age_check || "생애주기 미표시" },
+        { match: item.region_check ? "yes" : "unknown", text: item.region_check || "지역 미표시" },
+        { match: "note", text: "정부24·복지로 원문과 담당 기관에서 최종 확인해야 합니다." },
+      ],
+    },
+  };
+}
+
+async function fetchGovWelfare() {
+  const ticket = state.liveFetch;
+  const a = state.answers;
+  const params = new URLSearchParams({ source: "all", debug: "1" });
+  if (a.age != null) params.set("age", String(a.age));
+  if (a.region) params.set("region", a.region);
+  if (a.household) params.set("household", a.household);
+  if (a.marital) params.set("marital", a.marital);
+  if (a.disability) params.set("disability", a.disability);
+  if (a.income != null) params.set("income", String(a.income));
+  if (Array.isArray(a.interest) && a.interest.length) params.set("interests", a.interest.join(","));
+  const url = `/api/welfare?${params.toString()}`;
+  console.info("[GOV_TRACE] fetch.start", url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    console.info("[GOV_TRACE] fetch.done", res.status, data.count, data.stats, data.applied);
+    if (Array.isArray(data.trace)) data.trace.forEach((line) => console.info(line));
+    if (ticket !== state.liveFetch) return;
+    if (!res.ok) throw new Error(data.error || "복지 API 실패");
+    const extra = (data.items || []).map(govCardToRow);
+    const seen = new Set(state.liveRows.map((r) => r.p.title));
+    extra.forEach((row) => {
+      if (row.p.title && !seen.has(row.p.title)) {
+        seen.add(row.p.title);
+        state.liveRows.push(row);
+      }
+    });
+    const bits = [];
+    const st = data.stats || {};
+    ["benefit", "welfare", "local"].forEach((key) => {
+      const row = st[key];
+      if (!row) return;
+      const label = { benefit: "정부24", welfare: "중앙복지", local: "지자체복지" }[key];
+      bits.push(row.error ? `${label} 실패(${row.error})` : `${label} ${row.kept}`);
+    });
+    if (els.liveStatus) {
+      const prev = els.liveStatus.textContent || "";
+      els.liveStatus.textContent = (prev ? prev + " · " : "") + bits.join(" · ");
+    }
+    if (state.screen === "result") renderResults();
+  } catch (err) {
+    if (ticket !== state.liveFetch) return;
+    console.info("[GOV_TRACE] fetch.fail", err && err.message);
+    if (els.liveStatus) {
+      els.liveStatus.textContent = (els.liveStatus.textContent || "") + " · 정부24·복지로 API에 연결하지 못했습니다.";
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function finishToResult() {
   state.liveRows = [];
   state.liveFetch += 1;
   renderResults();
   fetchLivePolicies();
+  fetchGovWelfare();
 }
 
 function bind() {
