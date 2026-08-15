@@ -446,9 +446,9 @@ function mapLiveItem(item, source) {
 async function fetchLivePolicies() {
   const ticket = state.liveFetch;
   const a = state.answers;
-  if (els.liveStatus) els.liveStatus.textContent = "온통청년에서 같은 나이·지역 정책을 가져오는 중입니다.";
+  if (els.liveStatus) els.liveStatus.textContent = "온통청년 전체 목록 캐시에서 나이·지역에 맞는 정책을 고르는 중입니다.";
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 7000);
+  const timer = setTimeout(() => controller.abort(), 10000);
   const params = new URLSearchParams({ source: "policy", debug: "1" });
   if (a.age != null) params.set("age", String(a.age));
   if (a.region) params.set("region", a.region);
@@ -469,13 +469,18 @@ async function fetchLivePolicies() {
     const items = Array.isArray(data.items) ? data.items : [];
     state.liveRows = items
       .filter((it) => it && it.id && it.title && !known.has(it.title))
-      .slice(0, 6)
+      .slice(0, 24)
       .map((it) => mapLiveItem(it, "policy"));
     if (els.liveStatus) {
       const place = a.region || "전국";
+      const cache = data.cache || {};
+      const cacheBit = cache.size
+        ? `캐시 ${Number(cache.size).toLocaleString("ko-KR")}건`
+        : "캐시 없음";
+      const kept = data.stats && data.stats.policy ? data.stats.policy.kept : state.liveRows.length;
       els.liveStatus.textContent = state.liveRows.length
-        ? `온통청년 최신 전국 목록에서 ${place}·전국 ${state.liveRows.length}건을 붙였습니다. 온통청년은 지역을 서버에서 거르지 않아, 최신 공고 중 나이·시·도가 맞는 것만 보여 줍니다. 정부24·복지로·고용24는 목록을 받아오지 않습니다.`
-        : `온통청년에 연결했습니다. 최신 목록에 ${place}나 전국으로 맞는 청년 정책이 없었습니다. 정부24·복지로·고용24는 연결되지 않았습니다.`;
+        ? `온통청년 ${cacheBit} 중 ${place}·나이 맞는 ${kept}건에서 ${state.liveRows.length}건을 붙였습니다. 목록은 미리 받아 둔 스냅샷입니다.`
+        : `온통청년 ${cacheBit}을 읽었습니다. ${place}·나이에 맞는 청년 정책이 없었습니다.`;
     }
     if (state.screen === "result") renderResults();
   } catch (_) {

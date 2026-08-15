@@ -66,6 +66,9 @@
   - `GET https://www.youthcenter.go.kr/go/ythip/getPlcy` — 정책 (인증 파라미터 `apiKeyNm`)
   - `GET https://www.youthcenter.go.kr/go/ythip/getSpace` — 청년공간
   - `GET https://www.youthcenter.go.kr/go/ythip/getContent` — 콘텐츠 (응답이 커서 목록용으로는 비권장)
+- 목록은 요청마다 1페이지를 치지 않습니다. 군산 대시보드와 같이 `pageSize=100`으로 끝까지 받아
+  `data/youth_policy_snapshot.json`에 두고, `/api/policies`는 그 스냅샷을 나이·지역으로 거릅니다.
+  갱신: `py -3 scripts/sync_youth.py` 또는 `/api/policies?sync=1` (로컬·배치용).
 - 구 엔드포인트(`/opi/youthPlcyList.do`, 인증 파라미터 `openApiVlak`)는 문서에 남아 있으나 신규 개발은 `go/ythip` 계열을 쓰세요.
 
 ---

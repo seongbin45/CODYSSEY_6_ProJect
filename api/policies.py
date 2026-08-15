@@ -29,19 +29,38 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    from youth_cache import age_seconds, load_snapshot, meta as cache_meta, save_snapshot
+except ImportError:
+    from api.youth_cache import age_seconds, load_snapshot, meta as cache_meta, save_snapshot
+
 BASE_URL = "https://www.youthcenter.go.kr"
 POLICY_URL = BASE_URL + "/go/ythip/getPlcy"
 CONTENT_URL = BASE_URL + "/go/ythip/getContent"
 SPACE_URL = BASE_URL + "/go/ythip/getSpace"
 
-TIMEOUT = 3.0
+TIMEOUT = 8.0
 MAX_RETRIES = 2
 BACKOFF = 0.35
 PAGE_SIZE = 12
+# 군산 대시보드: YOUTH_POLICY_DEFAULT_PAGE_SIZE=100, _fetch_all_pages max_pages=200
+POLICY_SYNC_PAGE_SIZE = 100
+POLICY_SYNC_MAX_PAGES = 200
+POLICY_SHOW_LIMIT = 24
 SOURCE_PAGE_SIZE = {"policy": 12, "content": 2, "space": 10}
 SOURCE_DEADLINE = 3.6
 MAX_BODY_BYTES = 180000
+SYNC_MAX_BODY_BYTES = 700000
 MAX_TEXT_LEN = 2000
+
+SNAP_KEYS = (
+    "plcyNo", "plcyNm", "plcyExplnCn", "plcySprtCn", "plcyKywdNm",
+    "lclsfNm", "mclsfNm", "sprvsnInstCdNm", "operInstCdNm", "rgtrInstCdNm",
+    "ptcpPrpTrgtCn", "addAplyQlfcCndCn", "earnEtcCn",
+    "zipCd", "sprtTrgtMinAge", "sprtTrgtMaxAge", "sprtTrgtAgeLmtYn",
+    "aplyUrlAddr", "refUrlAddr1", "refUrlAddr2", "aplyYmd",
+    "sbmsnDcmntCn", "aplyMthdCn",
+)
 
 socket.setdefaulttimeout(TIMEOUT)
 
@@ -164,7 +183,7 @@ def _parse_body(text, content_type=""):
     return _xml_to_dict(root)
 
 
-def youth_get(url, params, key_name, trace=None):
+def youth_get(url, params, key_name, trace=None, max_body=None):
     """client.YouthApiClient.get 과 같은 인증·재시도."""
     endpoint = _safe_url(url)
     key = _secret(key_name)
@@ -179,6 +198,7 @@ def youth_get(url, params, key_name, trace=None):
     else:
         query["openApiVlak"] = key
 
+    limit = MAX_BODY_BYTES if max_body is None else max_body
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         started = time.time()
@@ -189,8 +209,8 @@ def youth_get(url, params, key_name, trace=None):
                 headers={"User-Agent": "doenayo/1.0", "Accept": "application/json"},
             )
             with urlopen(req, timeout=TIMEOUT) as resp:
-                blob = resp.read(MAX_BODY_BYTES + 1)
-                if len(blob) > MAX_BODY_BYTES:
+                blob = resp.read(limit + 1)
+                if len(blob) > limit:
                     _log(trace, "youth_get.too_large", endpoint, "bytes", len(blob))
                     raise YouthApiError("too_large", "response too large")
                 raw = blob.decode("utf-8", errors="replace")
@@ -240,13 +260,72 @@ def extract_items(payload):
     return []
 
 
-def policy_list_params(page_num=1):
+def policy_list_params(page_num=1, page_size=None):
     return {
         "pageNum": page_num,
-        "pageSize": PAGE_SIZE,
+        "pageSize": PAGE_SIZE if page_size is None else page_size,
         "pageType": "1",
         "rtnType": "json",
     }
+
+
+def slim_policy(item):
+    return {key: item.get(key) for key in SNAP_KEYS if item.get(key) not in (None, "")}
+
+
+def paging_meta(payload):
+    if not isinstance(payload, dict):
+        return {}
+    result = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+    paging = result.get("pagging") or result.get("paging") or {}
+    if not isinstance(paging, dict):
+        return {}
+    return paging
+
+
+def fetch_all_policy_pages(trace=None):
+    """군산 YouthDataService._fetch_all_pages — pageSize 100, 빈 페이지/짧은 페이지까지."""
+    all_items = []
+    seen = set()
+    tot_count = None
+    page_num = 1
+    while page_num <= POLICY_SYNC_MAX_PAGES:
+        params = policy_list_params(page_num, POLICY_SYNC_PAGE_SIZE)
+        payload = youth_get(POLICY_URL, params, "YOUTH_API_KEY", trace=trace, max_body=SYNC_MAX_BODY_BYTES)
+        paging = paging_meta(payload)
+        if tot_count is None and paging.get("totCount") is not None:
+            tot_count = _safe_int(paging.get("totCount"), 0)
+        items = extract_items(payload)
+        _log(trace, "sync.page", page_num, "got", len(items), "totCount", tot_count, "have", len(all_items))
+        if not items:
+            break
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            uid = str(item.get("plcyNo") or "")
+            if uid and uid in seen:
+                continue
+            if uid:
+                seen.add(uid)
+            all_items.append(slim_policy(item))
+        if len(items) < POLICY_SYNC_PAGE_SIZE:
+            break
+        if tot_count and len(all_items) >= tot_count:
+            break
+        page_num += 1
+        time.sleep(0.15)
+    return all_items, {"tot_count": tot_count, "pages": page_num}
+
+
+def sync_policy_snapshot(trace=None):
+    """군산 sync_source('policy') — 전체 목록을 받아 snapshot:policy 에 저장."""
+    _log(trace, "sync.begin", "pageSize", POLICY_SYNC_PAGE_SIZE)
+    items, extra = fetch_all_policy_pages(trace)
+    if not items:
+        raise YouthApiError("empty", "온통청년 정책 목록이 비었습니다")
+    payload = save_snapshot(items, extra)
+    _log(trace, "sync.done", "count", payload.get("count"), "tot_count", extra.get("tot_count"), "path", payload.get("_path"))
+    return payload
 
 
 def policy_detail_params(plcy_no):
@@ -536,6 +615,15 @@ def fetch_source_page(source, trace=None):
     return items
 
 
+def _region_rank(why):
+    why = str(why or "")
+    if "시·도명" in why or "코드 일치" in why:
+        return 0
+    if "전국" in why or "미지정" in why:
+        return 1
+    return 2
+
+
 def _filter_source(source, raw_items, query, age, city, limit=8, trace=None):
     rows = []
     kept = 0
@@ -547,36 +635,67 @@ def _filter_source(source, raw_items, query, age, city, limit=8, trace=None):
         age_max = item.get("sprtTrgtMaxAge")
         if not _matches_query(item, query, source):
             dropped["query"] += 1
-            _log(trace, "filter.drop", source, index, "query", title)
             continue
         ok_age, why_age = age_ok(item, age) if source == "policy" else (True, "해당 없음")
         if not ok_age:
             dropped["age"] += 1
-            _log(trace, "filter.drop", source, index, "age", why_age, "min", age_min, "max", age_max, "ask", age, title)
             continue
         ok_region, why_region = region_ok(item, city, source)
         if not ok_region:
             dropped["region"] += 1
-            _log(trace, "filter.drop", source, index, "region", why_region, "city", city, "zip", zip_cd, title)
             continue
         card = summarize(item, source)
         if not card["id"]:
             dropped["no_id"] += 1
-            _log(trace, "filter.drop", source, index, "no_id", title)
             continue
         card["age_check"] = why_age
         card["region_check"] = why_region
         kept += 1
-        _log(trace, "filter.keep", source, index, why_age, why_region, "id", card["id"], title)
-        if len(rows) < limit:
-            rows.append(card)
-    _log(trace, "filter.done", source, "raw", len(raw_items), "kept", kept, "shown", len(rows), "dropped", dropped)
-    return rows, kept
+        rows.append(card)
+    if source == "policy":
+        rows.sort(key=lambda card: (_region_rank(card.get("region_check")), card.get("id") or ""), reverse=False)
+    shown = rows[:limit]
+    _log(
+        trace, "filter.done", source, "raw", len(raw_items), "kept", kept,
+        "shown", len(shown), "dropped", dropped,
+    )
+    if kept and kept <= 8:
+        for card in shown:
+            _log(trace, "filter.keep", source, card.get("age_check"), card.get("region_check"), "id", card.get("id"), (card.get("title") or "")[:40])
+    return shown, kept
+
+
+def _load_policy_from_snapshot(query, age, city, trace=None):
+    snap = load_snapshot()
+    if not snap:
+        _log(trace, "snapshot.miss")
+        return None
+    items = snap.get("items") or []
+    info = cache_meta(snap)
+    _log(trace, "snapshot.hit", "size", info.get("size"), "age_s", info.get("age_seconds"), "path", info.get("path"))
+    rows, kept = _filter_source("policy", items, query, age, city, limit=POLICY_SHOW_LIMIT, trace=trace)
+    return {
+        "source": "policy",
+        "rows": rows,
+        "fetched": len(items),
+        "kept": kept,
+        "error": "",
+        "cache": info,
+    }
 
 
 def _load_one_source(source, query, age, city, trace=None):
+    if source == "policy":
+        cached = _load_policy_from_snapshot(query, age, city, trace)
+        if cached is not None:
+            return cached
+        _log(trace, "snapshot.empty_fallback_live_page")
     raw_items = fetch_source_page(source, trace=trace)
-    rows, kept = _filter_source(source, raw_items, query, age, city, trace=trace)
+    rows, kept = _filter_source(
+        source, raw_items, query, age, city,
+        limit=POLICY_SHOW_LIMIT if source == "policy" else 8,
+        trace=trace,
+    )
     return {
         "source": source,
         "rows": rows,
@@ -590,10 +709,10 @@ def list_catalog(query="", age=None, city="", sources=None, trace=None):
     wanted = sources or ("policy", "content", "space")
     sent = {
         "pageNum": 1,
-        "pageSize": PAGE_SIZE,
+        "pageSize": POLICY_SYNC_PAGE_SIZE,
         "pageType": "1",
         "rtnType": "json",
-        "note": "나이·거주는 요청 파라미터가 아니라 응답 필터로 적용(실측: getPlcy/getSpace 쿼리 무시)",
+        "note": "정책 목록은 스냅샷(전체 getPlcy)에서 거른다. 나이·거주는 요청 파라미터가 아니라 응답 필터.",
         "age": age,
         "region": city,
         "sources": list(wanted),
@@ -742,10 +861,18 @@ class handler(BaseHTTPRequestHandler):
             age = None
         city = re.sub(r"\s+", " ", (qs.get("region") or [""])[0]).strip()[:30]
         debug = (qs.get("debug") or [""])[0] in {"1", "true", "yes"}
+        do_sync = (qs.get("sync") or [""])[0] in {"1", "true", "yes"}
         trace = []
-        _log(trace, "http.get", "path", self.path, "source", source, "age", age, "city", city, "id", item_id, "debug", debug)
+        _log(trace, "http.get", "path", self.path, "source", source, "age", age, "city", city, "id", item_id, "debug", debug, "sync", do_sync)
 
         try:
+            if do_sync and not item_id:
+                snap = sync_policy_snapshot(trace)
+                payload = {"ok": True, "cache": cache_meta(snap), "count": snap.get("count")}
+                if debug:
+                    payload["trace"] = trace
+                _send(self, 200, payload)
+                return
             if item_id:
                 detail_source = source if source in SOURCE_META else "policy"
                 item = _run_deadline(policy_detail, SOURCE_DEADLINE + 1.0, item_id, detail_source, trace)
@@ -756,9 +883,15 @@ class handler(BaseHTTPRequestHandler):
             else:
                 sources = tuple(SOURCE_META) if source == "all" else (source,)
                 items, sent, stats = list_catalog(query=query, age=age, city=city, sources=sources, trace=trace)
-                payload = {"items": items, "count": len(items), "stats": stats, "applied": {
-                    "age": age, "region": city, "sources": list(sources),
-                }}
+                payload = {
+                    "items": items,
+                    "count": len(items),
+                    "stats": stats,
+                    "cache": cache_meta(),
+                    "applied": {
+                        "age": age, "region": city, "sources": list(sources),
+                    },
+                }
                 if debug:
                     payload["request"] = sent
                     payload["trace"] = trace
