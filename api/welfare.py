@@ -278,6 +278,42 @@ def _clip(text, n=160):
     return text
 
 
+def fmt_ymd(value):
+    text = str(value or "").strip()
+    if not text or text.startswith("9999"):
+        return "상시"
+    if re.fullmatch(r"\d{8}", text):
+        return "%s.%s.%s" % (text[:4], text[4:6], text[6:8])
+    return text
+
+
+_AGE_RANGE = re.compile(r"(?:만\s*)?(\d{1,2})\s*[~\-–]\s*(?:만\s*)?(\d{1,2})\s*세")
+_AGE_FROM = re.compile(r"(?:만\s*)?(\d{1,2})\s*세\s*이상")
+_AGE_TO = re.compile(r"(?:만\s*)?(\d{1,2})\s*세\s*이하")
+
+
+def text_age_ok(blob, age):
+    if age is None:
+        return True, "나이 미적용"
+    blob = str(blob or "")
+    found = _AGE_RANGE.search(blob)
+    if found:
+        low, high = int(found.group(1)), int(found.group(2))
+        if low > high:
+            low, high = high, low
+        ok = low <= age <= high
+        return ok, "문장 연령 %s~%s" % (low, high)
+    found = _AGE_FROM.search(blob)
+    if found:
+        low = int(found.group(1))
+        return age >= low, "문장 %s세 이상" % low
+    found = _AGE_TO.search(blob)
+    if found:
+        high = int(found.group(1))
+        return age <= high, "문장 %s세 이하" % high
+    return True, "문장에 연령 없음"
+
+
 def card_from_welfare(item, source):
     if source == "benefit":
         uid = str(item.get("서비스ID") or "")
@@ -285,7 +321,7 @@ def card_from_welfare(item, source):
         summary = item.get("서비스목적요약") or item.get("지원대상") or item.get("지원내용") or ""
         org = str(item.get("소관기관명") or "정부24")
         link = str(item.get("상세조회URL") or "https://www.gov.kr/")
-        deadline = str(item.get("신청기한") or "")
+        deadline = fmt_ymd(item.get("신청기한") or "")
         field = str(item.get("서비스분야") or "")
         return {
             "id": "gov-benefit-" + uid,
@@ -331,7 +367,7 @@ def card_from_welfare(item, source):
         "inst": org,
         "cat": [p.strip() for p in thema.split(",") if p.strip()][:3] or [label],
         "docs": [],
-        "deadline": "복지로에서 확인",
+        "deadline": fmt_ymd(item.get("enfcEndYmd") or "복지로에서 확인"),
         "link": link.replace("&amp;", "&"),
         "linkLabel": "복지로",
         "age_check": str(item.get("lifeArray") or item.get("lifeNmArray") or ""),
@@ -339,7 +375,7 @@ def card_from_welfare(item, source):
     }
 
 
-def fetch_benefit(interests, city, trace):
+def fetch_benefit(interests, city, age, trace):
     params = {"page": 1, "perPage": 8, "returnType": "JSON"}
     field = ""
     for name in interests or []:
@@ -360,12 +396,18 @@ def fetch_benefit(interests, city, trace):
         org = str(item.get("소관기관명") or "")
         kind = str(item.get("소관기관유형") or "")
         if city and city not in org and "중앙" not in kind and "교육청" not in kind and "공공" not in kind:
-            _log(trace, "filter.drop", "benefit", city, org, item.get("서비스명"))
+            _log(trace, "filter.drop", "benefit", "region", city, org, item.get("서비스명"))
+            continue
+        blob = " ".join(str(item.get(k) or "") for k in ("지원대상", "선정기준", "서비스목적요약"))
+        ok_age, why_age = text_age_ok(blob, age)
+        if not ok_age:
+            _log(trace, "filter.drop", "benefit", "age", why_age, "ask", age, item.get("서비스명"))
             continue
         card = card_from_welfare(item, "benefit")
+        card["age_check"] = why_age
         if card["remoteId"]:
             kept.append(card)
-            _log(trace, "filter.keep", "benefit", card["title"][:40], org)
+            _log(trace, "filter.keep", "benefit", card["title"][:40], org, why_age)
     return kept
 
 
@@ -431,7 +473,7 @@ def list_welfare(age, city, interests, household, marital, disability, income, s
     _log(trace, "list.begin", "age", age, "city", city, "life", life, "hh", hh, "thema", thema, "sources", sources)
     jobs = []
     if "benefit" in sources:
-        jobs.append(("benefit", fetch_benefit, (interests, city, trace)))
+        jobs.append(("benefit", fetch_benefit, (interests, city, age, trace)))
     if "welfare" in sources:
         jobs.append(("welfare", fetch_national, (life, hh, thema, trace)))
     if "local" in sources:
@@ -480,7 +522,7 @@ def detail_welfare(item_id, source, trace):
         card = card_from_welfare(item, "benefit")
         docs = [p.strip("- ").strip() for p in str(item.get("구비서류") or "").splitlines() if p.strip()]
         card["docs"] = docs[:8]
-        card["deadline"] = str(item.get("신청기한") or card["deadline"])
+        card["deadline"] = fmt_ymd(item.get("신청기한") or card["deadline"])
         card["summary"] = _clip(item.get("지원대상") or item.get("서비스목적") or card["summary"], 400)
         card["text"] = "\n".join([
             "[출처] 정부24 공공서비스",
@@ -502,7 +544,7 @@ def detail_welfare(item_id, source, trace):
         item = item["wantedDtl"]
     card = card_from_welfare(item, source)
     card["summary"] = _clip(item.get("tgtrDtlCn") or item.get("sprtTrgtCn") or item.get("servDgst") or card["summary"], 400)
-    card["deadline"] = str(item.get("enfcEndYmd") or card["deadline"])
+    card["deadline"] = fmt_ymd(item.get("enfcEndYmd") or card["deadline"])
     card["docs"] = [str(item.get("aplyMtdCn") or "복지로·주민센터에서 확인")]
     card["text"] = "\n".join([
         "[출처] 복지로 %s" % ("중앙부처" if source == "welfare" else "지자체"),
