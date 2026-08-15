@@ -226,7 +226,6 @@ def _blob(item):
         item.get("operInstCdNm"),
         item.get("rgtrInstCdNm"),
         item.get("ptcpPrpTrgtCn"),
-        item.get("zipCd"),
         item.get("lclsfNm"),
         item.get("mclsfNm"),
     ]
@@ -234,22 +233,26 @@ def _blob(item):
 
 
 def region_score(item):
-    """benefits_matcher._region_score 와 같은 군산/전북 가점."""
-    blob = _blob(item)
-    inst = str(item.get("sprvsnInstCdNm") or "") + str(item.get("rgtrInstCdNm") or "")
+    """표시용 지역. 우편번호 목록에 52130이 하나 들어 있다고 군산으로 부르지 않는다."""
+    title = str(item.get("plcyNm") or "")
+    inst = str(item.get("sprvsnInstCdNm") or "") + " " + str(item.get("rgtrInstCdNm") or "")
+    primary = title + " " + inst
     zip_cd = str(item.get("zipCd") or "")
-    if any(h in blob for h in GUNSAN_HINTS) or "군산" in inst:
-        return 50, "군산"
-    if any(h in blob or h in inst for h in JEONBUK_HINTS):
-        return 35, "전북"
     codes = re.findall(r"\d{5}", zip_cd)
-    if any(c in GUNSAN_ZIP_CODES for c in codes):
+
+    if any(h in primary for h in GUNSAN_HINTS):
         return 50, "군산"
-    if codes and any(c.startswith(JEONBUK_ZIP_PREFIXES) for c in codes):
+    if any(h in primary for h in JEONBUK_HINTS):
+        return 35, "전북"
+    if len(codes) >= 5:
+        return 10, "전국"
+    if len(codes) == 1 and codes[0] in GUNSAN_ZIP_CODES:
+        return 50, "군산"
+    if len(codes) == 1 and codes[0].startswith(JEONBUK_ZIP_PREFIXES):
         return 30, "전북"
-    if not zip_cd.strip():
+    if not codes:
         return 15, "전국"
-    return 5, "기타"
+    return 5, "복수 지역"
 
 
 def summarize(item, region_label):
@@ -294,7 +297,6 @@ def fetch_policy_page(page_num=1):
 
 def list_policies(query, scope):
     # 참고 서비스는 전 페이지를 캐시한다. Vercel 한도 안에서는 1페이지.
-    # getPlcy 는 zipCd 5자리만 받는다. 52130 = 군산시 (실측).
     params = policy_list_params(1)
     items = extract_items(youth_get(POLICY_URL, params, "YOUTH_API_KEY"))
     rows = []
@@ -309,11 +311,7 @@ def list_policies(query, scope):
         card = summarize(item, label)
         if not card["id"]:
             continue
-        card["_score"] = score
         rows.append(card)
-    rows.sort(key=lambda r: (-r["_score"], r["title"]))
-    for row in rows:
-        row.pop("_score", None)
     return rows[:30]
 
 
