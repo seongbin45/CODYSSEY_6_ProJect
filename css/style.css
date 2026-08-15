@@ -294,6 +294,13 @@ textarea {
   color: var(--c-muted);
 }
 
+.geo-btn {
+  margin-top: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 0.88rem;
+}
+
 .geo-hint {
   margin: var(--sp-3) 0 0;
   color: var(--c-muted);

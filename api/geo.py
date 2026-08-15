@@ -1,31 +1,23 @@
-"""접속 IP로 거주 지역을 추천한다.
+"""위치 추정.
 
 우선순위
-  1) Vercel 이 붙이는 x-vercel-ip-city / x-vercel-ip-country-region
-  2) 공개 HTTPS 조회 (ipwho.is) — 로컬·헤더 없을 때
+  1) 브라우저가 준 위도·경도 → Nominatim 역지오코딩
+  2) Vercel IP 헤더
+  3) ipwho.is
 """
 
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 import json
 import re
-
-def _place_label(city, region):
-    city = (city or "").strip()
-    region = (region or "").strip()
-    if city:
-        return city
-    if region:
-        return region
-    return ""
 
 
 def _send(handler, status, payload):
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Cache-Control", "private, max-age=300")
+    handler.send_header("Cache-Control", "private, max-age=120")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -55,10 +47,51 @@ def _is_public_ip(ip):
     return True
 
 
-def classify(city, region):
-    """입력란에 넣을 시·군 이름. 특정 광역을 고정하지 않는다."""
-    label = _place_label(city, region)
-    return label or "other"
+def shorten_place(name):
+    name = re.sub(r"\s+", "", str(name or ""))
+    for suffix in ("특별자치시", "특별자치도", "광역시", "특별시", "자치시", "시", "군"):
+        if name.endswith(suffix) and len(name) > len(suffix) + 1:
+            return name[: -len(suffix)]
+    return name
+
+
+def payload(city="", area="", source=""):
+    label = shorten_place(city) or shorten_place(area)
+    return {
+        "region": label,
+        "label": label,
+        "city": city,
+        "area": area,
+        "source": source,
+    }
+
+
+def reverse_geocode(lat, lon):
+    query = urlencode({
+        "lat": "%.6f" % lat,
+        "lon": "%.6f" % lon,
+        "format": "json",
+        "accept-language": "ko",
+        "zoom": 10,
+    })
+    req = Request(
+        "https://nominatim.openstreetmap.org/reverse?" + query,
+        headers={"User-Agent": "doenayo/1.0 (youth policy helper)", "Accept": "application/json"},
+    )
+    with urlopen(req, timeout=6) as resp:
+        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    addr = data.get("address") or {}
+    city = (
+        addr.get("city")
+        or addr.get("town")
+        or addr.get("village")
+        or addr.get("municipality")
+        or addr.get("county")
+        or addr.get("city_district")
+        or ""
+    )
+    area = addr.get("state") or addr.get("province") or addr.get("region") or ""
+    return str(city), str(area)
 
 
 def lookup_ipwho(ip):
@@ -70,44 +103,40 @@ def lookup_ipwho(ip):
         data = json.loads(resp.read().decode("utf-8", errors="replace"))
     if not data or data.get("success") is False:
         return "", ""
-    city = data.get("city") or ""
-    region = data.get("region") or data.get("region_code") or ""
-    return str(city), str(region)
+    return str(data.get("city") or ""), str(data.get("region") or data.get("region_code") or "")
 
 
-def suggest(handler):
+def suggest_from_coords(lat, lon):
+    city, area = reverse_geocode(lat, lon)
+    return payload(city, area, "gps")
+
+
+def suggest_from_ip(handler):
     city = _header(handler, "x-vercel-ip-city")
-    region = _header(handler, "x-vercel-ip-country-region")
-    source = "vercel"
-    if not city and not region:
-        city, region = lookup_ipwho(_client_ip(handler))
+    area = _header(handler, "x-vercel-ip-country-region")
+    source = "vercel-ip"
+    if not city and not area:
+        city, area = lookup_ipwho(_client_ip(handler))
         source = "ipwho"
-    label = classify(city, region)
-    if label == "other":
-        label = ""
-    return {
-        "region": label,
-        "label": label,
-        "city": city,
-        "area": region,
-        "source": source,
-    }
+    return payload(city, area, source)
 
 
 class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
+        qs = parse_qs(urlparse(self.path).query)
         try:
-            _send(self, 200, suggest(self))
+            if qs.get("lat") and qs.get("lon"):
+                lat = float(qs["lat"][0])
+                lon = float(qs["lon"][0])
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                    raise ValueError("range")
+                _send(self, 200, suggest_from_coords(lat, lon))
+                return
+            _send(self, 200, suggest_from_ip(self))
         except Exception as exc:
             print("GEO_ERROR:", type(exc).__name__)
-            _send(self, 200, {
-                "region": "",
-                "label": "",
-                "city": "",
-                "area": "",
-                "source": "fallback",
-            })
+            _send(self, 200, payload(source="fallback"))
 
     def do_POST(self):
         _send(self, 405, {"error": "GET /api/geo 만 지원합니다."})

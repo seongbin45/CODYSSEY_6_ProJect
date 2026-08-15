@@ -54,6 +54,7 @@ const userAge = document.getElementById('user-age');
 const userRegion = document.getElementById('user-region');
 const userEmployment = document.getElementById('user-employment');
 const geoHint = document.getElementById('geo-hint');
+const geoBtn = document.getElementById('geo-btn');
 const hamburger = document.querySelector('.hamburger');
 const navLinks  = document.querySelector('.nav-links');
 const themeBtn  = document.getElementById('theme-toggle');
@@ -73,21 +74,99 @@ if (userRegion) {
   userRegion.addEventListener('change', () => { regionTouched = true; });
 }
 
+function setGeoHint(message) {
+  if (geoHint) geoHint.textContent = message || '';
+}
+
+function applyPlace(place, how, force) {
+  if (!userRegion || !place) return false;
+  if (regionTouched && !force) return false;
+  userRegion.value = place;
+  try {
+    localStorage.setItem('doenayo-place', place);
+  } catch (_) { /* ignore */ }
+  setGeoHint(`${how} 기준으로 「${place}」을 넣었습니다. 다르면 직접 바꿔 주세요.`);
+  return true;
+}
+
+async function resolveCoords(lat, lon) {
+  const res = await fetch(`/api/geo?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+  const data = await res.json().catch(() => ({}));
+  return (data.label || data.region || data.city || '').trim();
+}
+
+function requestBrowserLocation(force) {
+  if (!navigator.geolocation) {
+    setGeoHint('이 브라우저는 위치 권한을 지원하지 않습니다. 시·군을 직접 입력해 주세요.');
+    return Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const place = await resolveCoords(pos.coords.latitude, pos.coords.longitude);
+          resolve(applyPlace(place, '기기 위치', force));
+        } catch (_) {
+          setGeoHint('좌표는 받았지만 시·군 이름을 찾지 못했습니다. 직접 입력해 주세요.');
+          resolve(false);
+        }
+      },
+      (err) => {
+        if (err.code === 1) {
+          setGeoHint('위치 권한이 거부되었습니다. IP 추정값을 쓰거나 시·군을 직접 입력해 주세요.');
+        } else if (err.code === 3) {
+          setGeoHint('위치 확인이 오래 걸려 중단했습니다. 시·군을 직접 입력해 주세요.');
+        } else {
+          setGeoHint('기기 위치를 읽지 못했습니다. 시·군을 직접 입력해 주세요.');
+        }
+        resolve(false);
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  });
+}
+
 async function suggestRegionFromIp() {
-  if (!userRegion || regionTouched) return;
+  if (!userRegion || regionTouched) return false;
   try {
     const res = await fetch('/api/geo');
     const data = await res.json().catch(() => ({}));
-    const place = (data.city || data.label || data.region || '').trim();
-    if (!res.ok || !place) return;
-    if (regionTouched) return;
-    userRegion.value = place;
-    if (geoHint) {
-      geoHint.textContent = `접속 위치를 기준으로 「${place}」을 추천했습니다. 다르면 직접 바꿔 주세요.`;
-    }
+    const place = (data.label || data.region || data.city || '').trim();
+    if (!res.ok || !place) return false;
+    return applyPlace(place, 'IP 추정(참고)', false);
   } catch (_) {
-    if (geoHint) geoHint.textContent = '';
+    return false;
   }
+}
+
+async function detectLocation() {
+  if (new URLSearchParams(location.search).get('demo') === '1') return;
+
+  try {
+    const saved = localStorage.getItem('doenayo-place');
+    if (saved && !regionTouched) applyPlace(saved, '이전 입력', false);
+  } catch (_) { /* ignore */ }
+
+  let gps = false;
+  if (navigator.permissions && navigator.permissions.query) {
+    try {
+      const status = await navigator.permissions.query({ name: 'geolocation' });
+      if (status.state === 'granted') {
+        gps = await requestBrowserLocation(true);
+      }
+    } catch (_) { /* Safari 등 */ }
+  }
+  if (!gps) await suggestRegionFromIp();
+}
+
+if (geoBtn) {
+  geoBtn.addEventListener('click', async () => {
+    geoBtn.disabled = true;
+    setGeoHint('위치 권한을 요청합니다…');
+    const ok = await requestBrowserLocation(true);
+    if (!ok) await suggestRegionFromIp();
+    geoBtn.disabled = false;
+  });
 }
 
 // ── 통신 ──────────────────────────────────────────────
@@ -441,9 +520,7 @@ if (themeBtn) {
   });
 }
 
-if (new URLSearchParams(location.search).get('demo') !== '1') {
-  suggestRegionFromIp();
-}
+detectLocation();
 
 // README·증빙용 미리보기: ?demo=1
 if (new URLSearchParams(location.search).get('demo') === '1') {
