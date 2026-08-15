@@ -46,6 +46,10 @@ const btn       = document.getElementById('submit-btn');
 const notice    = document.getElementById('notice');
 const result    = document.getElementById('result');
 const sampleBtn = document.getElementById('sample-btn');
+const youthQuery = document.getElementById('youth-query');
+const youthLoadBtn = document.getElementById('youth-load-btn');
+const youthStatus = document.getElementById('youth-status');
+const youthList = document.getElementById('youth-list');
 const hamburger = document.querySelector('.hamburger');
 const navLinks  = document.querySelector('.nav-links');
 const themeBtn  = document.getElementById('theme-toggle');
@@ -205,6 +209,97 @@ form.addEventListener('submit', async (e) => {
     setLoading(false);
   }
 });
+
+// ── 온통청년 목록 ─────────────────────────────────────
+function setYouthStatus(message) {
+  if (youthStatus) youthStatus.textContent = message || '';
+}
+
+function renderYouthList(items) {
+  if (!youthList) return;
+  youthList.innerHTML = '';
+  if (!items.length) {
+    youthList.hidden = true;
+    return;
+  }
+  items.forEach((item) => {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.innerHTML = `
+      <strong>${esc(item.title || '제목 없음')}</strong>
+      <span class="meta">${esc([item.region, item.inst].filter(Boolean).join(' · '))}</span>
+      ${item.summary ? `<p class="snippet">${esc(item.summary)}</p>` : ''}
+    `;
+    button.addEventListener('click', () => pickYouthPolicy(item.id, button));
+    li.appendChild(button);
+    youthList.appendChild(li);
+  });
+  youthList.hidden = false;
+}
+
+async function loadYouthPolicies() {
+  if (!youthLoadBtn) return;
+  const q = (youthQuery && youthQuery.value.trim()) || '';
+  youthLoadBtn.disabled = true;
+  setYouthStatus('온통청년에서 전북·군산 정책을 찾는 중입니다.');
+  try {
+    const params = new URLSearchParams({ scope: q.includes('군산') ? 'gunsan' : 'jeonbuk' });
+    if (q) params.set('q', q);
+    const res = await fetch(`/api/policies?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || '온통청년 목록을 가져오지 못했습니다.');
+    }
+    const items = Array.isArray(data.items) ? data.items : [];
+    renderYouthList(items);
+    setYouthStatus(items.length
+      ? `${items.length}건입니다. 고르면 아래 입력창에 채워집니다.`
+      : '조건에 맞는 정책이 없습니다. 검색어를 바꾸거나 직접 붙여넣어 주세요.');
+  } catch (err) {
+    renderYouthList([]);
+    setYouthStatus(err.message || '온통청년 목록을 가져오지 못했습니다.');
+  } finally {
+    youthLoadBtn.disabled = false;
+  }
+}
+
+async function pickYouthPolicy(id, button) {
+  if (!id) return;
+  if (button) button.disabled = true;
+  setYouthStatus('선택한 정책의 상세를 불러오는 중입니다.');
+  try {
+    const res = await fetch(`/api/policies?id=${encodeURIComponent(id)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || '정책 상세를 가져오지 못했습니다.');
+    }
+    const text = (data.item && data.item.text) || '';
+    if (!text) {
+      throw new Error('정책 본문이 비어 있습니다. 다른 항목을 고르거나 직접 붙여넣어 주세요.');
+    }
+    input.value = text.slice(0, MAX_LEN);
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+    setYouthStatus(`「${data.item.title || '선택한 정책'}」을 입력창에 넣었습니다. 결과 확인하기를 눌러 주세요.`);
+  } catch (err) {
+    setYouthStatus(err.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+if (youthLoadBtn) {
+  youthLoadBtn.addEventListener('click', loadYouthPolicies);
+}
+if (youthQuery) {
+  youthQuery.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      loadYouthPolicies();
+    }
+  });
+}
 
 // ── 샘플 넣어보기 ─────────────────────────────────────
 sampleBtn.addEventListener('click', () => {

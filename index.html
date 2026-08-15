@@ -60,11 +60,24 @@
     <section id="check" class="section">
       <h2>공고문 확인하기</h2>
       <p class="section-desc">
-        지원 자격, 제출 서류, 신청 기한이 담긴 부분을 붙여넣어 주세요.
-        정책을 찾아 드리지 않습니다. 이미 찾은 공고문을 읽어 드립니다.
+        지원 자격, 제출 서류, 신청 기한이 담긴 부분을 붙여넣거나,
+        온통청년에서 전북·군산 정책을 골라 입력창에 넣을 수 있습니다.
+        고른 뒤에도 해설은 같은 방식으로 진행됩니다.
       </p>
 
       <form id="check-form">
+        <fieldset class="youth-box">
+          <legend>온통청년에서 고르기</legend>
+          <p class="youth-hint">군산 대시보드와 같은 온통청년 정책 API를 사용합니다. 목록에서 고르면 아래 입력창에 채워집니다.</p>
+          <div class="youth-toolbar">
+            <label for="youth-query" class="sr-only">정책 검색어</label>
+            <input id="youth-query" type="search" placeholder="예: 군산, 주거, 취업" autocomplete="off">
+            <button type="button" id="youth-load-btn" class="btn-ghost">찾아보기</button>
+          </div>
+          <p id="youth-status" class="youth-status" aria-live="polite"></p>
+          <ul id="youth-list" class="youth-list" hidden></ul>
+        </fieldset>
+
         <label for="policy-input" class="sr-only">공고문 내용</label>
         <textarea id="policy-input" name="policy" rows="8"
                   placeholder="예: 지원 대상 - 공고일 기준 군산시에 주민등록을 둔 만 19세~34세 청년으로서 ..."
@@ -88,8 +101,8 @@
       <article class="guide-block">
         <h3>이렇게 쓰면 됩니다</h3>
         <ol class="guide-steps">
-          <li>공고문이나 HWP에서 자격·서류·기한 부분을 복사합니다.</li>
-          <li>확인하기에 붙여넣고 결과 확인하기를 누릅니다.</li>
+          <li>공고문·HWP에서 자격·서류·기한 부분을 복사하거나, 온통청년 목록에서 고릅니다.</li>
+          <li>확인하기 입력창을 확인하고 결과 확인하기를 누릅니다.</li>
           <li>체크리스트를 하나씩 보며 대상인지 스스로 판단합니다.</li>
           <li>서류 목록을 보고 원문과 담당 기관에서 최종 확인합니다.</li>
         </ol>

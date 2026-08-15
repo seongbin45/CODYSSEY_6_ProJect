@@ -51,7 +51,7 @@
 | 섹션 | 기능 |
 |---|---|
 | 홈 (`#home`) | 문제 제기, 3단계 사용법, 확인하기로 바로 이동 |
-| **확인하기 (`#check`)** | 공고문 입력 → AI 변환 → 4블록 결과 · 샘플 공고문 체험 · 글자수 카운터 |
+| **확인하기 (`#check`)** | 공고문 붙여넣기 또는 온통청년에서 고르기 → AI 변환 → 4블록 결과 |
 | 이용 안내 (`#guide`) | 사용법, **AI 요약의 한계 고지**, 자주 나오는 용어 풀이, 공식 출처 링크 |
 
 ---
@@ -76,6 +76,7 @@ doenayo/
 ├── css/style.css       # CSS 변수 기반 스타일, 모바일 우선
 ├── js/app.js           # 입력 검증, fetch, 상태 전환, 결과 렌더링
 ├── api/generate.py     # 서버리스 함수 → POST /api/generate
+├── api/policies.py     # 온통청년 목록·상세 → GET /api/policies
 ├── images/             # 로고, 스크린샷
 ├── 증빙자료/            # 스크린샷·대화 로그
 ├── requirements.txt    # google-genai 한 줄만
@@ -144,6 +145,7 @@ vercel dev
 |---|---|---|
 | `GEMINI_API_KEY` | Google Gemini API 인증 키 | https://aistudio.google.com/apikey |
 | `GEMINI_MODEL` | (선택) 사용할 모델명. 없으면 `gemini-2.5-flash` 부터 자동으로 내림 | AI Studio |
+| `YOUTH_API_KEY` | (선택) 온통청년 정책 목록. 없으면 붙여넣기만 사용 | https://www.youthcenter.go.kr 개발자센터 |
 
 ### 로컬
 
@@ -151,12 +153,13 @@ vercel dev
 
 ```
 GEMINI_API_KEY=your_key_here
+YOUTH_API_KEY=your_youth_key_here
 ```
 
 ### 배포 (Vercel)
 
 1. Vercel 프로젝트 > **Settings** > **Environment Variables**
-2. Name `GEMINI_API_KEY`, Value 에 발급받은 키 입력
+2. Name `GEMINI_API_KEY`, Value 에 발급받은 키 입력. 온통청년 목록을 쓰려면 `YOUTH_API_KEY` 도 추가
 3. **Production / Preview / Development 를 모두 체크**
 4. 저장 후 **Deployments 탭에서 Redeploy** (환경변수는 재배포해야 반영됩니다)
 
@@ -175,7 +178,7 @@ git log -p | grep -iE "AIza|api[_-]?key\s*=\s*['\"][A-Za-z0-9_-]{20,}"
 
 ## 8. 배포 방법
 
-1. GitHub 저장소에 push
+1. GitHub 저장소에 push (명령은 [12번](#12-git-초심자-가이드-이-저장소에-올린-명령) 참고)
 2. [vercel.com/new](https://vercel.com/new) → 저장소 Import
 3. **Framework Preset: `Other`** 선택 ← 다른 값으로 잡히면 반드시 변경
 4. Root Directory: `./`
@@ -298,6 +301,151 @@ git log -p | grep -iE "AIza|api[_-]?key\s*=\s*['\"][A-Za-z0-9_-]{20,}"
 
 ---
 
-## 12. 만든 사람
+## 12. Git 초심자 가이드 (이 저장소에 올린 명령)
+
+GitHub에 코드를 올릴 때 **실제로 사용한 명령**을, 다른 초심자가 자기 환경에서 그대로 따라 할 수 있게 풀어 둔 안내입니다.
+
+Windows에서는 **Git Bash** 또는 **명령 프롬프트(cmd)** 를 사용합니다.  
+아래 `<>` 안은 본인 값으로 바꿉니다. 꺾쇠는 입력하지 않습니다.
+
+### 12-1. 한 번만 하는 사용자 설정
+
+커밋에는 작성자 이름과 이메일이 붙습니다. 컴퓨터에서 처음 Git을 쓰면 먼저 등록합니다.
+
+```bash
+git config --global user.name "<본인이름>"
+git config --global user.email "<본인이메일@example.com>"
+
+# 잘 들어갔는지 확인
+git config --global --list
+```
+
+예시 (이 프로젝트 작성자):
+
+```bash
+git config --global user.name "seongbin45"
+git config --global user.email "sungbin45@office365.kunsan.ac.kr"
+```
+
+> 이메일은 GitHub 프로필에 공개된 주소, 또는 `Settings > Emails` 의 `...@users.noreply.github.com` 를 쓰면 됩니다.
+
+### 12-2. 프로젝트 폴더로 이동
+
+**명령 프롬프트(cmd)**
+
+```bat
+cd /d C:\Users\<윈도우사용자>\Downloads\CODYSSEY_6_ProJect
+```
+
+**Git Bash**
+
+```bash
+cd ~/Downloads/CODYSSEY_6_ProJect
+```
+
+이 저장소를 처음 받는 경우:
+
+```bash
+git clone https://github.com/seongbin45/CODYSSEY_6_ProJect.git
+cd CODYSSEY_6_ProJect
+```
+
+자기 저장소로 올릴 때는 주소만 바꿉니다.
+
+```bash
+git clone https://github.com/<사용자명>/<저장소명>.git
+cd <저장소명>
+```
+
+### 12-3. 비밀 키가 커밋되지 않는지 확인
+
+`.env` 에는 API 키가 들어 있습니다. 커밋하기 전에 **무시 목록에 들어 있는지** 확인합니다.
+
+```bash
+git check-ignore -v .env
+```
+
+정상 결과 예:
+
+```
+.gitignore:5:.env       .env
+```
+
+아무 줄도 안 나오면 `.gitignore` 에 `.env` 가 없는 것입니다. 그 상태로 `git add .` 하지 마세요.
+
+### 12-4. 지금 상태를 짧게 보기
+
+```bash
+git status --porcelain
+```
+
+앞글자 의미:
+
+| 표시 | 의미 |
+|---|---|
+| `??` | 아직 한 번도 add 하지 않은 새 파일 |
+| ` M` | 수정됨 (아직 add 안 함) |
+| `A ` | add 되어 커밋 대기 |
+| ` D` | 삭제됨 (아직 add 안 함) |
+
+전체 설명은 `git status` 가 더 읽기 쉽습니다.
+
+### 12-5. 올릴 파일만 고르기
+
+초심자는 `git add .` 보다 **파일 이름을 직접 적는 편**이 안전합니다.  
+`.env`, 과제 원문 HTML, 로컬 실험 폴더는 올리지 않습니다.
+
+이 서비스(되나요)를 처음 올렸을 때 사용한 명령:
+
+```bash
+git add .gitignore index.html css/style.css js/app.js api/generate.py requirements.txt env.example vercel.json README.md "기획서_되나요.md" "증빙자료" images/.gitkeep
+```
+
+추가한 뒤 다시 확인합니다.
+
+```bash
+git status
+```
+
+`Changes to be committed` 아래에만 이번 커밋에 들어갑니다.  
+`Untracked files` / `Changes not staged` 에 남은 것은 이번 커밋에 안 들어갑니다.
+
+### 12-6. 커밋하고 GitHub에 올리기
+
+```bash
+git commit -m "feat: add Doenayo web service with Gemini serverless API"
+git push -u origin main
+```
+
+이미 `main` 을 한 번 연동했다면 이후에는 `git push` 만 해도 됩니다.
+
+성공하면 비슷한 메시지가 나옵니다.
+
+```
+To https://github.com/seongbin45/CODYSSEY_6_ProJect.git
+   9b8c2ec..efcf3b0  main -> main
+branch 'main' set up to track 'origin/main'.
+```
+
+### 12-7. 자주 하는 실수
+
+| 상황 | 하지 말 것 | 대신 |
+|---|---|---|
+| 키가 들어 있는 `.env` | `git add .` | `git check-ignore -v .env` 로 확인 후, 필요한 파일만 add |
+| 커밋 전에 작성자 미설정 | 그냥 commit | `user.name` / `user.email` 먼저 |
+| 한국어 파일 이름 | 따옴표 없이 add | `"기획서_되나요.md"` 처럼 따옴표 |
+| 아직 원격이 없음 | `git push` 만 | `git remote add origin https://github.com/<사용자명>/<저장소명>.git` 후 push |
+
+원격이 아직 없다면:
+
+```bash
+git remote add origin https://github.com/<사용자명>/<저장소명>.git
+git branch -M main
+git push -u origin main
+```
+
+---
+
+## 13. 만든 사람
 
 최성빈 · 학습 목적 프로젝트 (AI 웹 개발 미션)
