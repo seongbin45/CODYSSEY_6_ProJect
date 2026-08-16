@@ -47,6 +47,7 @@ PAGE_SIZE = 12
 POLICY_SYNC_PAGE_SIZE = 100
 POLICY_SYNC_MAX_PAGES = 200
 POLICY_SHOW_LIMIT = 24
+POLICY_PAGE_MAX = 80
 SOURCE_PAGE_SIZE = {"policy": 12, "content": 2, "space": 10}
 SOURCE_DEADLINE = 3.6
 MAX_BODY_BYTES = 180000
@@ -624,7 +625,7 @@ def _region_rank(why):
     return 2
 
 
-def _filter_source(source, raw_items, query, age, city, limit=8, trace=None):
+def _filter_source(source, raw_items, query, age, city, limit=8, offset=0, trace=None):
     rows = []
     kept = 0
     dropped = {"query": 0, "age": 0, "region": 0, "no_id": 0}
@@ -654,7 +655,9 @@ def _filter_source(source, raw_items, query, age, city, limit=8, trace=None):
         rows.append(card)
     if source == "policy":
         rows.sort(key=lambda card: (_region_rank(card.get("region_check")), card.get("id") or ""), reverse=False)
-    shown = rows[:limit]
+    start = max(0, int(offset or 0))
+    cap = int(limit or 0)
+    shown = rows[start:start + cap] if cap else rows[start:]
     _log(
         trace, "filter.done", source, "raw", len(raw_items), "kept", kept,
         "shown", len(shown), "dropped", dropped,
@@ -665,15 +668,20 @@ def _filter_source(source, raw_items, query, age, city, limit=8, trace=None):
     return shown, kept
 
 
-def _load_policy_from_snapshot(query, age, city, trace=None):
+def _load_policy_from_snapshot(query, age, city, trace=None, offset=0, limit=None):
     snap = load_snapshot()
     if not snap:
         _log(trace, "snapshot.miss")
         return None
     items = snap.get("items") or []
     info = cache_meta(snap)
-    _log(trace, "snapshot.hit", "size", info.get("size"), "age_s", info.get("age_seconds"), "path", info.get("path"))
-    rows, kept = _filter_source("policy", items, query, age, city, limit=POLICY_SHOW_LIMIT, trace=trace)
+    _log(trace, "snapshot.hit", "size", info.get("size"), "age_s", info.get("age_seconds"), "path", info.get("path"), "offset", offset, "limit", limit)
+    rows, kept = _filter_source(
+        "policy", items, query, age, city,
+        limit=POLICY_SHOW_LIMIT if limit is None else limit,
+        offset=offset,
+        trace=trace,
+    )
     return {
         "source": "policy",
         "rows": rows,
@@ -684,16 +692,17 @@ def _load_policy_from_snapshot(query, age, city, trace=None):
     }
 
 
-def _load_one_source(source, query, age, city, trace=None):
+def _load_one_source(source, query, age, city, trace=None, offset=0, limit=None):
     if source == "policy":
-        cached = _load_policy_from_snapshot(query, age, city, trace)
+        cached = _load_policy_from_snapshot(query, age, city, trace, offset=offset, limit=limit)
         if cached is not None:
             return cached
         _log(trace, "snapshot.empty_fallback_live_page")
     raw_items = fetch_source_page(source, trace=trace)
     rows, kept = _filter_source(
         source, raw_items, query, age, city,
-        limit=POLICY_SHOW_LIMIT if source == "policy" else 8,
+        limit=POLICY_SHOW_LIMIT if limit is None else limit,
+        offset=offset,
         trace=trace,
     )
     return {
@@ -705,7 +714,7 @@ def _load_one_source(source, query, age, city, trace=None):
     }
 
 
-def list_catalog(query="", age=None, city="", sources=None, trace=None):
+def list_catalog(query="", age=None, city="", sources=None, trace=None, offset=0, limit=None):
     wanted = sources or ("policy", "content", "space")
     sent = {
         "pageNum": 1,
@@ -716,14 +725,16 @@ def list_catalog(query="", age=None, city="", sources=None, trace=None):
         "age": age,
         "region": city,
         "sources": list(wanted),
+        "offset": offset,
+        "limit": limit,
     }
-    _log(trace, "list_catalog.begin", "age", age, "city", city, "query", query, "sources", list(wanted))
+    _log(trace, "list_catalog.begin", "age", age, "city", city, "query", query, "sources", list(wanted), "offset", offset, "limit", limit)
     box = {}
 
     def run(source):
         try:
             box[source] = _run_deadline(
-                _load_one_source, SOURCE_DEADLINE, source, query, age, city, trace
+                _load_one_source, SOURCE_DEADLINE, source, query, age, city, trace, offset, limit
             )
         except YouthApiError as exc:
             _log(trace, "list_catalog.source_error", source, exc.code, exc)
@@ -862,8 +873,20 @@ class handler(BaseHTTPRequestHandler):
         city = re.sub(r"\s+", " ", (qs.get("region") or [""])[0]).strip()[:30]
         debug = (qs.get("debug") or [""])[0] in {"1", "true", "yes"}
         do_sync = (qs.get("sync") or [""])[0] in {"1", "true", "yes"}
+        try:
+            offset = max(0, int((qs.get("offset") or ["0"])[0]))
+        except ValueError:
+            offset = 0
+        try:
+            limit = int((qs.get("limit") or [str(POLICY_SHOW_LIMIT)])[0])
+        except ValueError:
+            limit = POLICY_SHOW_LIMIT
+        if limit < 1:
+            limit = POLICY_SHOW_LIMIT
+        if limit > POLICY_PAGE_MAX:
+            limit = POLICY_PAGE_MAX
         trace = []
-        _log(trace, "http.get", "path", self.path, "source", source, "age", age, "city", city, "id", item_id, "debug", debug, "sync", do_sync)
+        _log(trace, "http.get", "path", self.path, "source", source, "age", age, "city", city, "id", item_id, "debug", debug, "sync", do_sync, "offset", offset, "limit", limit)
 
         try:
             if do_sync and not item_id:
@@ -882,12 +905,21 @@ class handler(BaseHTTPRequestHandler):
                 _send(self, 200, payload)
             else:
                 sources = tuple(SOURCE_META) if source == "all" else (source,)
-                items, sent, stats = list_catalog(query=query, age=age, city=city, sources=sources, trace=trace)
+                items, sent, stats = list_catalog(
+                    query=query, age=age, city=city, sources=sources, trace=trace,
+                    offset=offset, limit=limit,
+                )
+                kept = 0
+                if stats.get("policy"):
+                    kept = int(stats["policy"].get("kept") or 0)
                 payload = {
                     "items": items,
                     "count": len(items),
                     "stats": stats,
                     "cache": cache_meta(),
+                    "offset": offset,
+                    "limit": limit,
+                    "has_more": offset + len(items) < kept,
                     "applied": {
                         "age": age, "region": city, "sources": list(sources),
                     },

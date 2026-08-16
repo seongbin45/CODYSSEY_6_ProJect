@@ -1,3 +1,6 @@
+const RESULT_PAGE = 8;
+const YOUTH_PAGE = 24;
+
 const state = {
   screen: "home",
   step: 0,
@@ -8,6 +11,10 @@ const state = {
   fontIdx: 0,
   liveRows: [],
   liveFetch: 0,
+  resultShown: RESULT_PAGE,
+  youthKept: 0,
+  youthHasMore: false,
+  moreBusy: false,
 };
 
 const els = {
@@ -33,6 +40,9 @@ const els = {
   profileLine: document.getElementById("profile-line"),
   resultHeadline: document.getElementById("result-headline"),
   resultList: document.getElementById("result-list"),
+  moreWrap: document.getElementById("more-wrap"),
+  moreBtn: document.getElementById("more-btn"),
+  moreCaption: document.getElementById("more-caption"),
   resultEmpty: document.getElementById("result-empty"),
   liveStatus: document.getElementById("live-status"),
   restartBtn: document.getElementById("restart-btn"),
@@ -96,6 +106,10 @@ function startChat() {
   state.detailId = null;
   state.liveRows = [];
   state.liveFetch += 1;
+  state.resultShown = RESULT_PAGE;
+  state.youthKept = 0;
+  state.youthHasMore = false;
+  state.moreBusy = false;
   resetChatLog();
   appendBubble(state.messages[0]);
   renderProgress();
@@ -218,8 +232,18 @@ function matched() {
   const wanted = rows.filter((r) => r.hit);
   const list = wanted.length ? wanted : rows;
   const order = { yes: 0, unknown: 1 };
-  return list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict]).slice(0, 8)
+  return list.sort((x, y) => order[x.ev.verdict] - order[y.ev.verdict])
     .concat(state.liveRows);
+}
+
+function youthPolicyCount() {
+  return state.liveRows.filter((row) => row.p && row.p.remoteSource === "policy").length;
+}
+
+function totalResultCount() {
+  const catalog = matched().filter((row) => !row.p.remoteId).length;
+  const otherLive = state.liveRows.filter((row) => row.p.remoteSource && row.p.remoteSource !== "policy").length;
+  return catalog + otherLive + Math.max(youthPolicyCount(), state.youthKept || 0);
 }
 
 function renderSegments() {
@@ -293,20 +317,38 @@ function ageLabel() {
   return found ? found.l : "";
 }
 
+function paintMoreButton(shown, total) {
+  if (!els.moreWrap || !els.moreBtn) return;
+  const canReveal = shown < matched().length;
+  const canFetch = state.youthHasMore && !state.moreBusy;
+  const hasMore = canReveal || canFetch;
+  els.moreWrap.hidden = !hasMore && !state.moreBusy;
+  els.moreBtn.classList.toggle("is-more", hasMore && !state.moreBusy);
+  els.moreBtn.classList.toggle("is-loading", state.moreBusy);
+  els.moreBtn.disabled = state.moreBusy;
+  els.moreBtn.setAttribute("aria-label", state.moreBusy ? "목록을 더 불러오는 중" : "목록 더 보기");
+  if (els.moreCaption) {
+    if (state.moreBusy) els.moreCaption.textContent = "목록을 더 가져오는 중입니다.";
+    else if (hasMore) els.moreCaption.textContent = `${shown} / ${total}건 · 더 보기`;
+    else els.moreCaption.textContent = "";
+  }
+}
+
 function renderResults() {
   const rows = matched();
+  const shownRows = rows.slice(0, state.resultShown);
   const interests = Array.isArray(state.answers.interest) ? state.answers.interest : [];
   const catalogCount = rows.filter((r) => !r.p.remoteId).length;
-  const liveCount = rows.filter((r) => r.p.remoteId).length;
+  const total = totalResultCount();
 
   els.profileLine.textContent = [ageLabel(), state.answers.region, interests.join("·")].filter(Boolean).join(" · ");
-  els.resultHeadline.textContent = rows.length ? `받을 수 있어 보이는 정책 ${rows.length}건` : "결과";
-  if (liveCount) {
-    els.resultHeadline.textContent = `받을 수 있어 보이는 정책 ${catalogCount}건 · 온통청년 ${liveCount}건`;
+  els.resultHeadline.textContent = rows.length ? `받을 수 있어 보이는 정책 ${total}건` : "결과";
+  if (state.youthKept) {
+    els.resultHeadline.textContent = `받을 수 있어 보이는 정책 ${catalogCount}건 · 온통청년 ${state.youthKept}건`;
   }
 
   els.resultList.innerHTML = "";
-  rows.forEach(({ p, ev }) => {
+  shownRows.forEach(({ p, ev }) => {
     const chip = CHIP[ev.verdict];
     const btn = document.createElement("button");
     btn.type = "button";
@@ -324,7 +366,8 @@ function renderResults() {
   });
 
   els.resultEmpty.hidden = rows.length > 0;
-  showScreen("result");
+  paintMoreButton(shownRows.length, total);
+  if (state.screen !== "result") showScreen("result");
 }
 
 function paintDetail(row) {
@@ -449,7 +492,7 @@ async function fetchLivePolicies() {
   if (els.liveStatus) els.liveStatus.textContent = "온통청년 전체 목록 캐시에서 나이·지역에 맞는 정책을 고르는 중입니다.";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
-  const params = new URLSearchParams({ source: "policy", debug: "1" });
+  const params = new URLSearchParams({ source: "policy", debug: "1", offset: "0", limit: String(YOUTH_PAGE) });
   if (a.age != null) params.set("age", String(a.age));
   if (a.region) params.set("region", a.region);
   const url = `/api/policies?${params.toString()}`;
@@ -467,19 +510,22 @@ async function fetchLivePolicies() {
     }
     const known = new Set(POLICIES.map((p) => p.title));
     const items = Array.isArray(data.items) ? data.items : [];
-    state.liveRows = items
+    const youth = items
       .filter((it) => it && it.id && it.title && !known.has(it.title))
-      .slice(0, 24)
       .map((it) => mapLiveItem(it, "policy"));
+    const others = state.liveRows.filter((row) => row.p.remoteSource !== "policy");
+    state.liveRows = youth.concat(others);
+    const kept = data.stats && data.stats.policy ? Number(data.stats.policy.kept || 0) : state.liveRows.length;
+    state.youthKept = kept;
+    state.youthHasMore = Boolean(data.has_more) || youthPolicyCount() < kept;
     if (els.liveStatus) {
       const place = a.region || "전국";
       const cache = data.cache || {};
       const cacheBit = cache.size
         ? `캐시 ${Number(cache.size).toLocaleString("ko-KR")}건`
         : "캐시 없음";
-      const kept = data.stats && data.stats.policy ? data.stats.policy.kept : state.liveRows.length;
       els.liveStatus.textContent = state.liveRows.length
-        ? `온통청년 ${cacheBit} 중 ${place}·나이 맞는 ${kept}건에서 ${state.liveRows.length}건을 붙였습니다. 목록은 미리 받아 둔 스냅샷입니다.`
+        ? `온통청년 ${cacheBit} 중 ${place}·나이 맞는 ${kept}건입니다. 아래 화살표로 더 볼 수 있습니다.`
         : `온통청년 ${cacheBit}을 읽었습니다. ${place}·나이에 맞는 청년 정책이 없었습니다.`;
     }
     if (state.screen === "result") renderResults();
@@ -578,9 +624,73 @@ async function fetchGovWelfare() {
 function finishToResult() {
   state.liveRows = [];
   state.liveFetch += 1;
+  state.resultShown = RESULT_PAGE;
+  state.youthKept = 0;
+  state.youthHasMore = false;
+  state.moreBusy = false;
   renderResults();
   fetchLivePolicies();
   fetchGovWelfare();
+}
+
+async function fetchMoreYouth() {
+  const ticket = state.liveFetch;
+  const a = state.answers;
+  const offset = youthPolicyCount();
+  if (!state.youthHasMore || offset >= state.youthKept) {
+    state.youthHasMore = false;
+    return;
+  }
+  const params = new URLSearchParams({
+    source: "policy",
+    offset: String(offset),
+    limit: String(YOUTH_PAGE),
+  });
+  if (a.age != null) params.set("age", String(a.age));
+  if (a.region) params.set("region", a.region);
+  const res = await fetch(`/api/policies?${params.toString()}`);
+  const data = await res.json().catch(() => ({}));
+  if (ticket !== state.liveFetch) return;
+  if (!res.ok) throw new Error(data.error || "더 불러오지 못했습니다.");
+  const known = new Set(state.liveRows.map((row) => row.p.id));
+  const titles = new Set(state.liveRows.map((row) => row.p.title).concat(POLICIES.map((p) => p.title)));
+  (data.items || []).forEach((it) => {
+    if (!it || !it.id || !it.title || titles.has(it.title)) return;
+    const row = mapLiveItem(it, "policy");
+    if (known.has(row.p.id)) return;
+    state.liveRows.push(row);
+    titles.add(it.title);
+  });
+  const kept = data.stats && data.stats.policy ? Number(data.stats.policy.kept || state.youthKept) : state.youthKept;
+  state.youthKept = kept;
+  state.youthHasMore = Boolean(data.has_more) || youthPolicyCount() < kept;
+}
+
+async function showMoreResults() {
+  if (state.moreBusy) return;
+  const have = matched().length;
+  if (state.resultShown < have) {
+    state.resultShown = Math.min(state.resultShown + RESULT_PAGE, have);
+    renderResults();
+    return;
+  }
+  if (!state.youthHasMore) {
+    renderResults();
+    return;
+  }
+  state.moreBusy = true;
+  renderResults();
+  try {
+    await fetchMoreYouth();
+  } catch (_) {
+    if (els.liveStatus) {
+      els.liveStatus.textContent = (els.liveStatus.textContent || "") + " · 다음 목록을 가져오지 못했습니다.";
+    }
+  } finally {
+    state.moreBusy = false;
+    state.resultShown = Math.min(state.resultShown + RESULT_PAGE, matched().length);
+    renderResults();
+  }
 }
 
 function bind() {
@@ -592,6 +702,7 @@ function bind() {
   els.multiBtn.addEventListener("click", confirmMulti);
   els.restartBtn.addEventListener("click", startChat);
   els.resultGuideBtn.addEventListener("click", goGuide);
+  if (els.moreBtn) els.moreBtn.addEventListener("click", () => { showMoreResults(); });
   els.backResultBtn.addEventListener("click", () => { renderResults(); });
   els.fontBtn.addEventListener("click", cycleFont);
 }
