@@ -1,0 +1,144 @@
+git 터미널에서 사용한 명령어를 다른 초심자누구라도 재사용 가능한 형태로(user name, email 까지) 만들어주세요. 차근차근.
+
+```bat
+cd /d C:\Users\seong\Downloads\CODYSSEY_6_ProJect
+
+git check-ignore -v .env
+git status --porcelain
+
+git add .gitignore index.html css/style.css js/app.js api/generate.py requirements.txt env.example vercel.json README.md "기획서_되나요.md" "증빙자료" images/.gitkeep
+
+git status
+git commit -m "feat: add Doenayo web service with Gemini serverless API"
+git push -u origin main
+```
+
+```git
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$ git check-ignore -v .env
+.gitignore:5:.env       .env
+
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$ git status --porcelain
+ M .gitignore
+ D "other/api\354\227\260\353\217\231/API Gateway\354\227\220 \354\230\244\354\213\240 \352\262\203\354\235\204 \355\231\230\354\230\201\355\225\251\353\213\210\353\213\244!.md"
+ D "other/api\354\227\260\353\217\231/Anthropic Messages API.md"
+ D "other/api\354\227\260\353\217\231/Audio \342\200\224 \355\205\215\354\212\244\355\212\270 \354\235\214\354\204\261 \353\263\200\355\231\230.md"
+ D "other/api\354\227\260\353\217\231/Chat Completions API.md"
+ D "other/api\354\227\260\353\217\231/Claude Code CLI \354\227\260\353\217\231.md"
+ D "other/api\354\227\260\353\217\231/Codex CLI \354\227\260\353\217\231.md"
+ D "other/api\354\227\260\353\217\231/Credits API.md"
+ D "other/api\354\227\260\353\217\231/OpenAI Responses API.md"
+ D "other/api\354\227\260\353\217\231/OpenAI SDK \354\227\260\353\217\231.md"
+ D "other/api\354\227\260\353\217\231/OpenClaw \354\227\260\353\217\231.md"
+ D "other/api\354\227\260\353\217\231/OpenCode \354\227\260\353\217\231.md"
+ D "other/api\354\227\260\353\217\231/curl \354\230\210\354\240\234.md"
+ D "other/api\354\227\260\353\217\231/\353\271\204\353\224\224\354\230\244 \354\203\235\354\204\261.md"
+ D "other/api\354\227\260\353\217\231/\354\202\254\354\232\251 \352\260\200\353\212\245\355\225\234 AI \353\252\250\353\215\270\354\235\204 \354\241\260\355\232\214\355\225\230\353\212\224 \353\260\251\353\262\225.md"
+ D "other/api\354\227\260\353\217\231/\354\225\210\354\240\204\355\225\230\352\262\214 \354\202\254\354\232\251\355\225\230\352\270\260 \354\234\204\355\225\234 \354\235\270\354\246\235 \354\204\244\354\240\225.md"
+ D "other/api\354\227\260\353\217\231/\354\227\220\353\237\254.md"
+ D "other/api\354\227\260\353\217\231/\354\235\264\353\257\270\354\247\200 \354\203\235\354\204\261.md"
+?? README.md
+?? api/
+?? css/
+?? env.example
+?? images/
+?? index.html
+?? js/
+?? requirements.txt
+?? scripts/
+?? vercel.json
+?? "\352\265\254\355\230\204\352\260\200\354\235\264\353\223\234_\353\220\230\353\202\230\354\232\224.md"
+?? "\352\270\260\354\241\264\354\236\220\354\202\260_\354\247\204\353\213\250\354\204\234.md"
+?? "\352\270\260\355\232\215\354\204\234_\353\220\230\353\202\230\354\232\224.md"
+?? "\354\213\244\355\226\211\352\263\204\355\232\215\354\204\234.md"
+?? "\354\246\235\353\271\231\354\236\220\353\243\214/"
+?? "\355\205\214\354\212\244\355\212\270\353\215\260\354\235\264\355\204\260_\353\220\230\353\202\230\354\232\224.md"
+
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$ git add .gitignore index.html css/style.css js/app.js api/generate.py requirements.txt env.example vercel.json README.md "기획서_되나요.md" "증빙자료" images/.gitkeep
+
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$ git status
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+        modified:   .gitignore
+        new file:   README.md
+        new file:   api/generate.py
+        new file:   css/style.css
+        new file:   env.example
+        new file:   images/.gitkeep
+        new file:   index.html
+        new file:   js/app.js
+        new file:   requirements.txt
+        new file:   vercel.json
+        new file:   "\352\270\260\355\232\215\354\204\234_\353\220\230\353\202\230\354\232\224.md"
+        new file:   "\354\246\235\353\271\231\354\236\220\353\243\214/01_\354\212\244\355\201\254\353\246\260\354\203\267/\354\264\254\354\230\201\354\210\234\354\204\234.md"
+        new file:   "\354\246\235\353\271\231\354\236\220\353\243\214/02_AI\354\275\224\353\224\251\353\217\204\352\265\254_\354\202\254\354\232\251\352\263\274\354\240\225/conversation_log.md"
+
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        deleted:    "other/api\354\227\260\353\217\231/API Gateway\354\227\220 \354\230\244\354\213\240 \352\262\203\354\235\204 \355\231\230\354\230\201\355\225\251\353\213\210\353\213\244!.md"
+        deleted:    "other/api\354\227\260\353\217\231/Anthropic Messages API.md"
+        deleted:    "other/api\354\227\260\353\217\231/Audio \342\200\224 \355\205\215\354\212\244\355\212\270 \354\235\214\354\204\261 \353\263\200\355\231\230.md"
+        deleted:    "other/api\354\227\260\353\217\231/Chat Completions API.md"
+        deleted:    "other/api\354\227\260\353\217\231/Claude Code CLI \354\227\260\353\217\231.md"
+        deleted:    "other/api\354\227\260\353\217\231/Codex CLI \354\227\260\353\217\231.md"
+        deleted:    "other/api\354\227\260\353\217\231/Credits API.md"
+        deleted:    "other/api\354\227\260\353\217\231/OpenAI Responses API.md"
+        deleted:    "other/api\354\227\260\353\217\231/OpenAI SDK \354\227\260\353\217\231.md"
+        deleted:    "other/api\354\227\260\353\217\231/OpenClaw \354\227\260\353\217\231.md"
+        deleted:    "other/api\354\227\260\353\217\231/OpenCode \354\227\260\353\217\231.md"
+        deleted:    "other/api\354\227\260\353\217\231/curl \354\230\210\354\240\234.md"
+        deleted:    "other/api\354\227\260\353\217\231/\353\271\204\353\224\224\354\230\244 \354\203\235\354\204\261.md"
+        deleted:    "other/api\354\227\260\353\217\231/\354\202\254\354\232\251 \352\260\200\353\212\245\355\225\234 AI \353\252\250\353\215\270\354\235\204 \354\241\260\355\232\214\355\225\230\353\212\224 \353\260\251\353\262\225.md"
+        deleted:    "other/api\354\227\260\353\217\231/\354\225\210\354\240\204\355\225\230\352\262\214 \354\202\254\354\232\251\355\225\230\352\270\260 \354\234\204\355\225\234 \354\235\270\354\246\235 \354\204\244\354\240\225.md"
+        deleted:    "other/api\354\227\260\353\217\231/\354\227\220\353\237\254.md"
+        deleted:    "other/api\354\227\260\353\217\231/\354\235\264\353\257\270\354\247\200 \354\203\235\354\204\261.md"
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        scripts/
+        "\352\265\254\355\230\204\352\260\200\354\235\264\353\223\234_\353\220\230\353\202\230\354\232\224.md"
+        "\352\270\260\354\241\264\354\236\220\354\202\260_\354\247\204\353\213\250\354\204\234.md"
+        "\354\213\244\355\226\211\352\263\204\355\232\215\354\204\234.md"
+        "\355\205\214\354\212\244\355\212\270\353\215\260\354\235\264\355\204\260_\353\220\230\353\202\230\354\232\224.md"
+
+
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$ git commit -m "feat: add Doenayo web service with Gemini serverless API"
+[main efcf3b0] feat: add Doenayo web service with Gemini serverless API
+ 13 files changed, 1752 insertions(+)
+ create mode 100644 README.md
+ create mode 100644 api/generate.py
+ create mode 100644 css/style.css
+ create mode 100644 env.example
+ create mode 100644 images/.gitkeep
+ create mode 100644 index.html
+ create mode 100644 js/app.js
+ create mode 100644 requirements.txt
+ create mode 100644 vercel.json
+ create mode 100644 "\352\270\260\355\232\215\354\204\234_\353\220\230\353\202\230\354\232\224.md"
+ create mode 100644 "\354\246\235\353\271\231\354\236\220\353\243\214/01_\354\212\244\355\201\254\353\246\260\354\203\267/\354\264\254\354\230\201\354\210\234\354\204\234.md"
+ create mode 100644 "\354\246\235\353\271\231\354\236\220\353\243\214/02_AI\354\275\224\353\224\251\353\217\204\352\265\254_\354\202\254\354\232\251\352\263\274\354\240\225/conversation_log.md"
+
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$ git push -u origin main
+Enumerating objects: 24, done.
+Counting objects: 100% (24/24), done.
+Delta compression using up to 8 threads
+Compressing objects: 100% (12/12), done.
+Writing objects: 100% (22/22), 28.70 KiB | 5.74 MiB/s, done.
+Total 22 (delta 1), reused 0 (delta 0), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (1/1), completed with 1 local object.
+To https://github.com/seongbin45/CODYSSEY_6_ProJect.git
+   9b8c2ec..efcf3b0  main -> main
+branch 'main' set up to track 'origin/main'.
+
+seong@BOOK-8TSJL7A64D MINGW64 ~/Downloads/CODYSSEY_6_ProJect (main)
+$
+```
